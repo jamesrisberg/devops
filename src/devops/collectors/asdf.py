@@ -12,18 +12,16 @@ class AsdfCollector(BaseCollector):
 
     @staticmethod
     def is_available() -> bool:
-        """Check if asdf is available."""
-        asdf_dir = os.environ.get("ASDF_DATA_DIR", str(Path.home() / ".asdf"))
-        if Path(asdf_dir).exists():
-            return True
+        """Check if asdf has installed plugins.
 
+        Only uses fast filesystem checks - no subprocess calls.
+        """
+        asdf_dir = os.environ.get("ASDF_DATA_DIR", str(Path.home() / ".asdf"))
+        plugins_dir = Path(asdf_dir) / "plugins"
         try:
-            result = subprocess.run(
-                ["asdf", "--version"], capture_output=True, timeout=5
-            )
-            if result.returncode == 0:
+            if plugins_dir.exists() and any(plugins_dir.iterdir()):
                 return True
-        except Exception:
+        except (PermissionError, OSError):
             pass
 
         return False

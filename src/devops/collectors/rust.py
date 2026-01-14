@@ -12,18 +12,16 @@ class RustCollector(BaseCollector):
 
     @staticmethod
     def is_available() -> bool:
-        """Check if rustup is available."""
-        rustup_home = os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup"))
-        if Path(rustup_home).exists():
-            return True
+        """Check if rustup has installed toolchains.
 
+        Only uses fast filesystem checks - no subprocess calls.
+        """
+        rustup_home = os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup"))
+        toolchains_dir = Path(rustup_home) / "toolchains"
         try:
-            result = subprocess.run(
-                ["rustup", "--version"], capture_output=True, timeout=5
-            )
-            if result.returncode == 0:
+            if toolchains_dir.exists() and any(toolchains_dir.iterdir()):
                 return True
-        except Exception:
+        except (PermissionError, OSError):
             pass
 
         return False
