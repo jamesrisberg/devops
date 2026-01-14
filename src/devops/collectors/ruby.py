@@ -12,8 +12,9 @@ class RubyCollector(BaseCollector):
 
     @staticmethod
     def is_available() -> bool:
-        """Check if any Ruby version manager has actual installed versions.
+        """Check if rbenv or chruby has actual installed versions.
 
+        Only shows Ruby tab for version managers, not Homebrew/system Ruby.
         Only uses fast filesystem checks - no subprocess calls.
         """
         # Check for rbenv with actual versions installed
@@ -39,16 +40,7 @@ class RubyCollector(BaseCollector):
         except (PermissionError, OSError):
             pass
 
-        # Check for homebrew ruby via filesystem (fast)
-        homebrew_ruby = Path("/opt/homebrew/opt/ruby/bin/ruby")
-        if homebrew_ruby.exists():
-            return True
-        # Intel Mac path
-        homebrew_ruby_intel = Path("/usr/local/opt/ruby/bin/ruby")
-        if homebrew_ruby_intel.exists():
-            return True
-
-        # Don't show tab for system ruby - it's not useful to display
+        # Don't show tab for Homebrew or system Ruby - they don't manage environments
         return False
 
     def collect(self) -> list[EnvEntry]:
