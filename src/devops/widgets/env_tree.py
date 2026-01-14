@@ -57,6 +57,13 @@ class EnvTree(Tree):
             # PATH entries
             elif "search_order" in details:
                 self._add_path_children(node, entry)
+            # NPM packages (check before Homebrew to avoid "packages" key collision)
+            elif (
+                details.get("type") in ("global", "local", "outdated")
+                and "packages" in details
+                and entry.path in ("npm global", "npm outdated")
+            ):
+                self._add_npm_children(node, entry)
             # Homebrew packages
             elif "packages" in details and details.get("type") in (
                 "outdated",
@@ -99,9 +106,6 @@ class EnvTree(Tree):
             # asdf plugins with versions
             elif "plugin" in details and "versions" in details:
                 self._add_asdf_children(node, entry)
-            # NPM packages
-            elif details.get("type") in ("global", "local") and "packages" in details:
-                self._add_npm_children(node, entry)
 
         self.root.expand()
         self.root.allow_expand = False
@@ -163,28 +167,11 @@ class EnvTree(Tree):
     def _add_path_children(self, node, entry: EnvEntry) -> None:
         details = entry.details
 
-        if details.get("is_homebrew") and details.get("executable_count", 0) > 50:
-            brew_text = Text(
-                f"🍺 {details['executable_count']} Homebrew packages",
-                style="bold yellow",
-            )
-            node.add_leaf(brew_text)
-            for exe in details.get("all_executables", [])[:5]:
-                exe_text = Text(f"  {exe}", style="dim")
-                node.add_leaf(exe_text, data={"executable": exe, "path": entry.path})
-            more = Text(
-                f"  ... and {details['executable_count'] - 5} more", style="dim italic"
-            )
-            node.add_leaf(more)
-        elif details.get("exists") and details.get("all_executables"):
+        if details.get("exists") and details.get("all_executables"):
             execs = details["all_executables"]
-            shown = execs[:50]
-            for exe in shown:
+            for exe in execs:
                 exe_text = Text(f"  {exe}", style="dim")
                 node.add_leaf(exe_text, data={"executable": exe, "path": entry.path})
-            if len(execs) > 50:
-                more = Text(f"  ... and {len(execs) - 50} more", style="dim italic")
-                node.add_leaf(more)
 
         if details.get("issue"):
             issue = Text(f"⚠ {details['issue']}", style="bold yellow")

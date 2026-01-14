@@ -13,7 +13,7 @@ class PathCollector(BaseCollector):
 
     SHELL_CONFIGS = [
         "~/.zshenv",
-        "~/.zprofile",  
+        "~/.zprofile",
         "~/.zshrc",
         "~/.bashrc",
         "~/.bash_profile",
@@ -25,7 +25,7 @@ class PathCollector(BaseCollector):
     PATH_PATTERNS = [
         r'export\s+PATH\s*=\s*["\']?([^"\'\n]+)["\']?',
         r'PATH\s*=\s*["\']?([^"\'\n]+)["\']?',
-        r'path\s*\+=\s*\(([^)]+)\)',
+        r"path\s*\+=\s*\(([^)]+)\)",
     ]
 
     # Known special directories
@@ -98,10 +98,15 @@ class PathCollector(BaseCollector):
             all_executables = []
             if exists and is_dir:
                 try:
-                    execs = sorted([f.name for f in path_obj.iterdir() 
-                            if f.is_file() and os.access(f, os.X_OK)])
+                    execs = sorted(
+                        [
+                            f.name
+                            for f in path_obj.iterdir()
+                            if f.is_file() and os.access(f, os.X_OK)
+                        ]
+                    )
                     exec_count = len(execs)
-                    all_executables = execs  # Store all of them
+                    all_executables = execs
                 except PermissionError:
                     pass
 
@@ -125,7 +130,7 @@ class PathCollector(BaseCollector):
                     "issue": issue,
                     "issue_detail": issue_detail,
                     "fix_suggestion": fix_suggestion,
-                }
+                },
             )
             entries.append(entry)
 
@@ -165,8 +170,8 @@ class PathCollector(BaseCollector):
                                         )
                                         if expanded_part not in sources:
                                             sources[expanded_part] = (
-                                                str(config_path), 
-                                                line_num
+                                                str(config_path),
+                                                line_num,
                                             )
                 except (PermissionError, UnicodeDecodeError):
                     continue

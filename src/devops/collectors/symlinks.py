@@ -60,17 +60,19 @@ class SymlinkCollector(BaseCollector):
 
             if symlinks or broken:
                 status = Status.WARNING if broken else Status.HEALTHY
-                entries.append(EnvEntry(
-                    name=dir_path,
-                    path=expanded,
-                    status=status,
-                    details={
-                        "total_symlinks": len(symlinks) + len(broken),
-                        "healthy": len(symlinks),
-                        "broken": len(broken),
-                        "symlinks": symlinks[:100],  # Limit for performance
-                        "broken_links": broken,
-                    }
-                ))
+                entries.append(
+                    EnvEntry(
+                        name=dir_path,
+                        path=expanded,
+                        status=status,
+                        details={
+                            "total_symlinks": len(symlinks) + len(broken),
+                            "healthy": len(symlinks),
+                            "broken": len(broken),
+                            "symlinks": symlinks[:100],  # Limit for performance
+                            "broken_links": broken,
+                        },
+                    )
+                )
 
         return entries

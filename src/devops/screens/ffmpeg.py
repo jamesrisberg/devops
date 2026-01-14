@@ -1,12 +1,14 @@
 """FFmpeg command builder screen."""
-import subprocess
-import shutil
+
 import os
+import shutil
+import subprocess
 from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Static, Button, Input, Select, TextArea, Checkbox
 from textual.widget import Widget
+from textual.widgets import Button, Checkbox, Input, Select, Static, TextArea
 
 from devops.widgets.path_input import PathInput
 
@@ -119,104 +121,169 @@ class FFmpegScreen(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._ffmpeg_installed = shutil.which("ffmpeg") is not None
+        self._ffmpeg_installed: bool | None = None  # Lazy check
         self._current_command = ["ffmpeg"]
         self._process = None
+
+    def _check_ffmpeg_installed(self) -> bool:
+        """Lazy check for ffmpeg installation."""
+        if self._ffmpeg_installed is None:
+            self._ffmpeg_installed = shutil.which("ffmpeg") is not None
+        return self._ffmpeg_installed
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="ffmpeg-container"):
             with VerticalScroll(classes="left-panel"):
                 yield Static("FFmpeg Command Builder", classes="section-header")
-                
-                if not self._ffmpeg_installed:
-                    yield Static("\n⚠ FFmpeg not installed!", id="not-installed")
-                    yield Button("Install FFmpeg", id="install-ffmpeg", variant="warning")
-                
+
+                # Install warning - shown/hidden on mount after lazy check
+                yield Static(
+                    "\n⚠ FFmpeg not installed!", id="not-installed", classes="hidden"
+                )
+                yield Button(
+                    "Install FFmpeg",
+                    id="install-ffmpeg",
+                    variant="warning",
+                    classes="hidden",
+                )
+
                 # Input file
                 yield Static("\n📁 Input File", classes="section-header")
                 yield PathInput(placeholder="Start typing path...", id="input-file")
                 yield Static("Type path or drag file here", classes="help-text")
-                
+
                 # What do you want to do? (Toggles)
                 yield Static("\n🎬 What do you want to do?", classes="section-header")
-                yield Static("Toggle options to show their settings:", classes="help-text")
-                
-                yield Checkbox("Convert format", id="toggle-convert", classes="toggle-row")
+                yield Static(
+                    "Toggle options to show their settings:", classes="help-text"
+                )
+
+                yield Checkbox(
+                    "Convert format", id="toggle-convert", classes="toggle-row"
+                )
                 with Vertical(id="convert-options", classes="options-group hidden"):
                     yield Static("Output format:")
                     yield Select(
-                        [(("MP4 (H.264)", "mp4")), (("WebM (VP9)", "webm")),
-                         (("MOV", "mov")), (("MKV", "mkv")), (("AVI", "avi"))],
-                        id="output-format", value="mp4"
+                        [
+                            (("MP4 (H.264)", "mp4")),
+                            (("WebM (VP9)", "webm")),
+                            (("MOV", "mov")),
+                            (("MKV", "mkv")),
+                            (("AVI", "avi")),
+                        ],
+                        id="output-format",
+                        value="mp4",
                     )
-                
-                yield Checkbox("Compress / reduce size", id="toggle-compress", classes="toggle-row")
+
+                yield Checkbox(
+                    "Compress / reduce size", id="toggle-compress", classes="toggle-row"
+                )
                 with Vertical(id="compress-options", classes="options-group hidden"):
                     yield Static("Quality:")
                     yield Select(
-                        [(("High quality (CRF 18)", "18")), (("Good (CRF 23)", "23")),
-                         (("Medium (CRF 28)", "28")), (("Low/small (CRF 32)", "32"))],
-                        id="quality", value="23"
+                        [
+                            (("High quality (CRF 18)", "18")),
+                            (("Good (CRF 23)", "23")),
+                            (("Medium (CRF 28)", "28")),
+                            (("Low/small (CRF 32)", "32")),
+                        ],
+                        id="quality",
+                        value="23",
                     )
                     yield Static("Encoding speed:")
                     yield Select(
-                        [(("Fast", "fast")), (("Medium", "medium")), (("Slow (better)", "slow"))],
-                        id="speed", value="medium"
+                        [
+                            (("Fast", "fast")),
+                            (("Medium", "medium")),
+                            (("Slow (better)", "slow")),
+                        ],
+                        id="speed",
+                        value="medium",
                     )
-                
+
                 yield Checkbox("Resize video", id="toggle-resize", classes="toggle-row")
                 with Vertical(id="resize-options", classes="options-group hidden"):
                     yield Static("Resolution:")
                     yield Select(
-                        [(("4K (3840p)", "3840:-1")), (("1080p", "1920:-1")),
-                         (("720p", "1280:-1")), (("480p", "854:-1")),
-                         (("Custom", "custom"))],
-                        id="resolution", value="1920:-1"
+                        [
+                            (("4K (3840p)", "3840:-1")),
+                            (("1080p", "1920:-1")),
+                            (("720p", "1280:-1")),
+                            (("480p", "854:-1")),
+                            (("Custom", "custom")),
+                        ],
+                        id="resolution",
+                        value="1920:-1",
                     )
                     yield Input(placeholder="Custom: width:height", id="custom-res")
-                
-                yield Checkbox("Trim / cut video", id="toggle-trim", classes="toggle-row")
+
+                yield Checkbox(
+                    "Trim / cut video", id="toggle-trim", classes="toggle-row"
+                )
                 with Vertical(id="trim-options", classes="options-group hidden"):
                     yield Static("Start time:")
                     yield Input(placeholder="00:00:00 or seconds", id="start-time")
                     yield Static("Duration:")
                     yield Input(placeholder="00:00:30 or seconds", id="duration")
-                
-                yield Checkbox("Extract audio only", id="toggle-audio", classes="toggle-row")
+
+                yield Checkbox(
+                    "Extract audio only", id="toggle-audio", classes="toggle-row"
+                )
                 with Vertical(id="audio-options", classes="options-group hidden"):
                     yield Static("Audio format:")
                     yield Select(
-                        [(("MP3", "mp3")), (("AAC", "aac")), (("WAV", "wav")),
-                         (("FLAC", "flac")), (("OGG", "ogg"))],
-                        id="audio-format", value="mp3"
+                        [
+                            (("MP3", "mp3")),
+                            (("AAC", "aac")),
+                            (("WAV", "wav")),
+                            (("FLAC", "flac")),
+                            (("OGG", "ogg")),
+                        ],
+                        id="audio-format",
+                        value="mp3",
                     )
                     yield Static("Audio quality:")
                     yield Select(
-                        [(("High (320k)", "320k")), (("Good (192k)", "192k")),
-                         (("Medium (128k)", "128k"))],
-                        id="audio-quality", value="192k"
+                        [
+                            (("High (320k)", "320k")),
+                            (("Good (192k)", "192k")),
+                            (("Medium (128k)", "128k")),
+                        ],
+                        id="audio-quality",
+                        value="192k",
                     )
-                
-                yield Checkbox("Remove audio", id="toggle-noaudio", classes="toggle-row")
-                
+
+                yield Checkbox(
+                    "Remove audio", id="toggle-noaudio", classes="toggle-row"
+                )
+
                 # Output file
                 yield Static("\n📤 Output File", classes="section-header")
                 yield PathInput(placeholder="Leave empty for auto", id="output-file")
-                yield Static("Auto-generates based on input + options", classes="help-text")
+                yield Static(
+                    "Auto-generates based on input + options", classes="help-text"
+                )
 
             with Vertical(classes="right-panel"):
                 yield Static("Command Preview", classes="section-header")
                 yield Static("ffmpeg", id="command-preview")
-                
+
                 with Horizontal(classes="action-buttons"):
                     yield Button("▶ Run", id="run-cmd", variant="success")
                     yield Button("📋 Copy", id="copy-cmd", variant="primary")
                     yield Button("Clear", id="clear-cmd", variant="default")
-                
+
                 yield Static("\nOutput", classes="section-header")
                 yield TextArea(id="output-area", read_only=True)
 
     def on_mount(self) -> None:
+        # Lazy check for ffmpeg - show warning if not installed
+        if not self._check_ffmpeg_installed():
+            try:
+                self.query_one("#not-installed").styles.display = "block"
+                self.query_one("#install-ffmpeg").styles.display = "block"
+            except Exception:
+                pass
         self._update_visibility()
         self._update_command_preview()
 
@@ -229,7 +296,6 @@ class FFmpegScreen(Widget):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         self._update_command_preview()
-
 
     def _update_visibility(self) -> None:
         """Show/hide option groups based on toggles."""
@@ -251,35 +317,36 @@ class FFmpegScreen(Widget):
                     options.styles.display = "none"
             except Exception:
                 pass
+
     def _update_command_preview(self) -> None:
         """Build FFmpeg command based on selections."""
         cmd = ["ffmpeg", "-y"]  # -y to overwrite
-        
+
         try:
             inp = self.query_one("#input-file", PathInput).value.strip()
-            
+
             # Trim - start time before input for fast seeking
             if self.query_one("#toggle-trim", Checkbox).value:
                 start = self.query_one("#start-time", Input).value.strip()
                 if start:
                     cmd.extend(["-ss", start])
-            
+
             # Input
             if inp:
                 cmd.extend(["-i", inp])
-            
+
             # Duration after input
             if self.query_one("#toggle-trim", Checkbox).value:
                 dur = self.query_one("#duration", Input).value.strip()
                 if dur:
                     cmd.extend(["-t", dur])
-            
+
             # Audio extraction mode
             if self.query_one("#toggle-audio", Checkbox).value:
                 cmd.append("-vn")  # No video
                 fmt = self.query_one("#audio-format", Select).value
                 qual = self.query_one("#audio-quality", Select).value
-                
+
                 if fmt == "mp3":
                     cmd.extend(["-c:a", "libmp3lame", "-b:a", qual])
                 elif fmt == "aac":
@@ -290,7 +357,7 @@ class FFmpegScreen(Widget):
                     cmd.extend(["-c:a", "flac"])
                 elif fmt == "ogg":
                     cmd.extend(["-c:a", "libvorbis", "-b:a", qual])
-                
+
                 # Output
                 out = self.query_one("#output-file", PathInput).value.strip()
                 if not out and inp:
@@ -309,13 +376,13 @@ class FFmpegScreen(Widget):
                         cmd.extend(["-c:v", "libvpx-vp9", "-c:a", "libopus"])
                     elif out_fmt == "mov":
                         cmd.extend(["-c:v", "libx264", "-c:a", "aac"])
-                
+
                 # Compression
                 if self.query_one("#toggle-compress", Checkbox).value:
                     crf = self.query_one("#quality", Select).value
                     speed = self.query_one("#speed", Select).value
                     cmd.extend(["-crf", crf, "-preset", speed])
-                
+
                 # Resize
                 if self.query_one("#toggle-resize", Checkbox).value:
                     res = self.query_one("#resolution", Select).value
@@ -325,11 +392,11 @@ class FFmpegScreen(Widget):
                             cmd.extend(["-vf", f"scale={custom}"])
                     else:
                         cmd.extend(["-vf", f"scale={res}"])
-                
+
                 # Remove audio
                 if self.query_one("#toggle-noaudio", Checkbox).value:
                     cmd.append("-an")
-                
+
                 # Output
                 out = self.query_one("#output-file", PathInput).value.strip()
                 if not out and inp:
@@ -344,13 +411,19 @@ class FFmpegScreen(Widget):
                     out = f"{base}{suffix}.{out_fmt}"
                 if out:
                     cmd.append(out)
-            
+
             self._current_command = cmd
             preview = self.query_one("#command-preview", Static)
             # Format nicely
             if len(cmd) > 6:
-                formatted = cmd[0] + " " + cmd[1] + " \\\n  " + " \\\n  ".join(
-                    [" ".join(cmd[i:i+2]) for i in range(2, len(cmd), 2)]
+                formatted = (
+                    cmd[0]
+                    + " "
+                    + cmd[1]
+                    + " \\\n  "
+                    + " \\\n  ".join(
+                        [" ".join(cmd[i : i + 2]) for i in range(2, len(cmd), 2)]
+                    )
                 )
                 preview.update(formatted)
             else:
@@ -375,7 +448,7 @@ class FFmpegScreen(Widget):
             ["brew", "install", "ffmpeg"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True
+            text=True,
         )
         self._output_lines = []
         self.set_timer(0.1, self._poll_process)
@@ -385,15 +458,15 @@ class FFmpegScreen(Widget):
         if not inp:
             self.app.notify("Please specify an input file", severity="warning")
             return
-        
+
         output = self.query_one("#output-area", TextArea)
         output.load_text(f"Running...\n\n")
-        
+
         self._process = subprocess.Popen(
             self._current_command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True
+            text=True,
         )
         self._output_lines = []
         self.set_timer(0.1, self._poll_process)
@@ -401,8 +474,9 @@ class FFmpegScreen(Widget):
     def _poll_process(self) -> None:
         if self._process is None:
             return
-        
+
         import fcntl
+
         try:
             fd = self._process.stdout.fileno()
             fl = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -414,7 +488,7 @@ class FFmpegScreen(Widget):
                 output.load_text("".join(self._output_lines[-50:]))
         except (BlockingIOError, IOError):
             pass
-        
+
         ret = self._process.poll()
         if ret is None:
             self.set_timer(0.2, self._poll_process)
@@ -430,6 +504,7 @@ class FFmpegScreen(Widget):
     def _copy_command(self) -> None:
         try:
             import pyperclip
+
             pyperclip.copy(" ".join(self._current_command))
             self.app.notify("Copied!")
         except:

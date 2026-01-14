@@ -155,11 +155,14 @@ class MainScreen(Widget):
                     yield DetailPanel(id="npm-detail")
 
     def on_mount(self) -> None:
-        self._load_fast_data()
-        # Start loading slower data in background
-        self.set_timer(0.1, self._load_brew_data)
+        # Load shell config synchronously (it's fast)
+        self._load_shell_data()
+        # Load everything else in background
+        self.set_timer(0.05, self._load_path_data)
+        self.set_timer(0.1, self._load_symlinks_data)
+        self.set_timer(0.15, self._load_brew_data)
         self.set_timer(0.2, self._load_python_data)
-        self.set_timer(0.3, self._load_npm_data)
+        self.set_timer(0.25, self._load_npm_data)
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
@@ -317,23 +320,29 @@ class MainScreen(Widget):
             pass
         return []
 
-    def _load_fast_data(self) -> None:
-        """Load fast collectors synchronously."""
-        try:
-            tree = self.query_one("#path-tree", EnvTree)
-            tree.set_entries(self._path_collector.collect())
-        except Exception as e:
-            self.app.notify(f"PATH error: {e}", severity="error")
-
+    def _load_shell_data(self) -> None:
+        """Load shell config synchronously (it's fast)."""
         try:
             tree = self.query_one("#shell-tree", EnvTree)
             tree.set_entries(self._shell_collector.collect())
         except Exception as e:
             self.app.notify(f"Shell error: {e}", severity="error")
 
+    def _load_path_data(self) -> None:
+        """Load PATH data."""
+        try:
+            tree = self.query_one("#path-tree", EnvTree)
+            tree.set_entries(self._path_collector.collect())
+            tree.root.label = "PATH Search Order (c=collapse)"
+        except Exception as e:
+            self.app.notify(f"PATH error: {e}", severity="error")
+
+    def _load_symlinks_data(self) -> None:
+        """Load symlinks data."""
         try:
             tree = self.query_one("#symlinks-tree", EnvTree)
             tree.set_entries(self._symlink_collector.collect())
+            tree.root.label = "Symlinks (c=collapse)"
         except Exception as e:
             self.app.notify(f"Symlinks error: {e}", severity="error")
 
@@ -502,7 +511,9 @@ class MainScreen(Widget):
         self._ruby_loaded = False
         self._rust_loaded = False
         self._asdf_loaded = False
-        self._load_fast_data()
+        self._load_shell_data()
+        self._load_path_data()
+        self._load_symlinks_data()
 
         # Reload current tab if it's a slow one
         tabs = self.query_one("#main-tabs", TabbedContent)
@@ -563,6 +574,16 @@ class MainScreen(Widget):
                 detail_panel.show_executable(node_data["executable"], node_data["path"])
                 return
 
+            # NPM package - check before "package" to avoid confusion with Homebrew
+            if "npm_package" in node_data:
+                detail_panel.show_npm_package(
+                    node_data["npm_package"],
+                    node_data.get("pkg_type", "global"),
+                    node_data.get("project_path", ""),
+                )
+                return
+
+            # Homebrew package
             if "package" in node_data:
                 detail_panel.show_package(node_data["package"])
                 return
@@ -586,15 +607,6 @@ class MainScreen(Widget):
                     node_data.get("env_type", ""),
                     node_data.get("env_path", ""),
                     node_data.get("is_system", False),
-                )
-                return
-
-            # NPM package
-            if "npm_package" in node_data:
-                detail_panel.show_npm_package(
-                    node_data["npm_package"],
-                    node_data.get("pkg_type", "global"),
-                    node_data.get("project_path", ""),
                 )
                 return
 
@@ -664,9 +676,14 @@ class MainScreen(Widget):
                 detail_panel.show_shell_file_selected(node_data.path, node_data.name)
                 return
 
-            # Check for outdated category
+            # Check for outdated category (differentiate npm vs homebrew)
             if details.get("type") == "outdated" and "packages" in details:
-                detail_panel.show_outdated_summary(details["packages"])
+                # Check which tree this is from
+                tree_id = node.tree.id if hasattr(node, "tree") else ""
+                if tree_id == "npm-tree":
+                    detail_panel.show_npm_outdated_summary(details["packages"])
+                else:
+                    detail_panel.show_outdated_summary(details["packages"])
                 return
 
             # Check for homebrew category
@@ -675,6 +692,11 @@ class MainScreen(Widget):
                 detail_panel.show_homebrew_welcome(
                     outdated, loading=not self._brew_loaded
                 )
+                return
+
+            # Check for NPM group (global/local)
+            if details.get("type") in ("global", "local"):
+                detail_panel.show_npm_welcome()
                 return
 
             detail_panel.show_entry(node_data)
@@ -809,6 +831,118 @@ class MainScreen(Widget):
         except Exception as e:
             self.app.notify(f"Error: {e}", severity="error")
 
+    # NPM upgrade all handler
+    def on_detail_panel_npm_upgrade_package(
+        self, event: DetailPanel.NpmUpgradePackage
+    ) -> None:
+        """Handle single npm package upgrade request."""
+        pkg = event.package_name
+        self.app.notify(f"Upgrading {pkg}...", timeout=3)
+        self.set_timer(0.1, lambda: self._run_npm_upgrade_single(pkg))
+
+    def _run_npm_upgrade_single(self, package_name: str) -> None:
+        """Run npm install -g package@latest with live output."""
+        try:
+            panel = self.query_one("#npm-detail", DetailPanel)
+            panel.show_running_command(
+                f"Upgrading {package_name}", f"npm install -g {package_name}@latest"
+            )
+        except Exception:
+            pass
+
+        self._npm_process = subprocess.Popen(
+            ["npm", "install", "-g", "--loglevel", "notice", f"{package_name}@latest"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        self._npm_output = []
+        self._npm_upgrading_package = package_name
+        self.set_timer(0.1, self._poll_npm_upgrade)
+
+    def on_detail_panel_npm_upgrade_all(self, event: DetailPanel.NpmUpgradeAll) -> None:
+        """Handle npm upgrade all request."""
+        self.app.notify("Upgrading all global NPM packages...", timeout=5)
+        self.set_timer(0.1, self._run_npm_upgrade_all)
+
+    def _run_npm_upgrade_all(self) -> None:
+        """Run npm update -g with live output."""
+        try:
+            panel = self.query_one("#npm-detail", DetailPanel)
+            panel.show_running_command("Upgrading Global NPM Packages", "npm update -g")
+        except Exception:
+            pass
+
+        self._npm_process = subprocess.Popen(
+            ["npm", "update", "-g", "--loglevel", "notice"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        self._npm_output = []
+        self.set_timer(0.1, self._poll_npm_upgrade)
+
+    def _poll_npm_upgrade(self) -> None:
+        """Poll npm upgrade process for output."""
+        if not hasattr(self, "_npm_process") or self._npm_process is None:
+            return
+
+        import fcntl
+        import os
+
+        while True:
+            if self._npm_process.stdout is None:
+                break
+            try:
+                fd = self._npm_process.stdout.fileno()
+                fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                line = self._npm_process.stdout.readline()
+                if line:
+                    self._npm_output.append(line)
+                    try:
+                        panel = self.query_one("#npm-detail", DetailPanel)
+                        panel.append_output(line)
+                    except Exception:
+                        pass
+                else:
+                    break
+            except (BlockingIOError, IOError):
+                break
+
+        ret = self._npm_process.poll()
+        if ret is None:
+            self.set_timer(0.2, self._poll_npm_upgrade)
+        else:
+            output = "".join(self._npm_output)
+            pkg_name = getattr(self, "_npm_upgrading_package", None)
+            title = f"Upgrade {pkg_name}" if pkg_name else "Upgrade Global NPM Packages"
+
+            try:
+                panel = self.query_one("#npm-detail", DetailPanel)
+                panel.show_command_complete(title, ret == 0, output)
+            except Exception:
+                pass
+
+            if ret == 0:
+                msg = (
+                    f"{pkg_name} upgraded!"
+                    if pkg_name
+                    else "All NPM packages upgraded!"
+                )
+                self.app.notify(msg, severity="information")
+            else:
+                self.app.notify("NPM upgrade had errors", severity="warning")
+
+            self._npm_upgrading_package = None
+
+            # Refresh NPM data
+            self._npm_loaded = False
+            self._load_npm_data()
+            self._npm_process = None
+
     # Homebrew handlers
     def on_detail_panel_upgrade_package(
         self, event: DetailPanel.UpgradePackage
@@ -922,6 +1056,86 @@ class MainScreen(Widget):
         """Handle brew upgrade all request."""
         self.app.notify("Upgrading all packages...", timeout=5)
         self.set_timer(0.1, self._run_brew_upgrade_all)
+
+    def on_detail_panel_brew_uninstall_package(
+        self, event: DetailPanel.BrewUninstallPackage
+    ) -> None:
+        """Handle brew uninstall request."""
+        pkg = event.package_name
+        self.app.notify(f"Uninstalling {pkg}...", timeout=3)
+        self.set_timer(0.1, lambda: self._run_brew_uninstall(pkg))
+
+    def _run_brew_uninstall(self, package_name: str) -> None:
+        """Run brew uninstall with live output."""
+        try:
+            panel = self.query_one("#brew-detail", DetailPanel)
+            panel.show_running_command(
+                f"Uninstalling {package_name}", f"brew uninstall {package_name}"
+            )
+        except Exception:
+            pass
+
+        self._brew_process = subprocess.Popen(
+            ["brew", "uninstall", package_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        self._brew_output = []
+        self._brew_uninstalling = package_name
+        self.set_timer(0.1, self._poll_brew_uninstall)
+
+    def _poll_brew_uninstall(self) -> None:
+        """Poll brew uninstall process for output."""
+        if not hasattr(self, "_brew_process") or self._brew_process is None:
+            return
+
+        import fcntl
+        import os
+
+        while True:
+            if self._brew_process.stdout is None:
+                break
+            try:
+                fd = self._brew_process.stdout.fileno()
+                fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                line = self._brew_process.stdout.readline()
+                if line:
+                    self._brew_output.append(line)
+                    try:
+                        panel = self.query_one("#brew-detail", DetailPanel)
+                        panel.append_output(line)
+                    except Exception:
+                        pass
+                else:
+                    break
+            except (BlockingIOError, IOError):
+                break
+
+        ret = self._brew_process.poll()
+        if ret is None:
+            self.set_timer(0.2, self._poll_brew_uninstall)
+        else:
+            output = "".join(self._brew_output)
+            pkg_name = getattr(self, "_brew_uninstalling", "package")
+            try:
+                panel = self.query_one("#brew-detail", DetailPanel)
+                panel.show_command_complete(f"Uninstall {pkg_name}", ret == 0, output)
+            except Exception:
+                pass
+
+            if ret == 0:
+                self.app.notify(f"{pkg_name} uninstalled!", severity="information")
+                get_brew_list_cache().invalidate_all()
+            else:
+                self.app.notify("Uninstall had errors", severity="warning")
+
+            self._brew_loaded = False
+            self._load_brew_data()
+            self._brew_process = None
+            self._brew_uninstalling = None
 
     def _run_brew_upgrade_all(self) -> None:
         """Run brew upgrade with live output."""

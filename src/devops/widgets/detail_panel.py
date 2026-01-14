@@ -26,6 +26,11 @@ class DetailPanel(VerticalScroll):
     class BrewUpgradeAll(Message):
         pass
 
+    class BrewUninstallPackage(Message):
+        def __init__(self, package_name: str):
+            self.package_name = package_name
+            super().__init__()
+
     # Symlink messages
     class DeleteSymlink(Message):
         def __init__(self, symlink_path: str) -> None:
@@ -65,6 +70,14 @@ class DetailPanel(VerticalScroll):
             self.package_name = package_name
             self.is_global = is_global
             self.project_path = project_path
+            super().__init__()
+
+    class NpmUpgradeAll(Message):
+        pass
+
+    class NpmUpgradePackage(Message):
+        def __init__(self, package_name: str):
+            self.package_name = package_name
             super().__init__()
 
     # Shell config editing messages
@@ -383,6 +396,44 @@ class DetailPanel(VerticalScroll):
         self._content.update(content)
         self._shown_welcome = True
 
+    def show_npm_outdated_summary(self, packages: list) -> None:
+        """Show NPM outdated packages summary with upgrade button."""
+        self._clear_buttons()
+        content = Text()
+        content.append(
+            f"Outdated NPM Packages ({len(packages)})\n\n",
+            style="bold yellow underline",
+        )
+        content.append("These global packages have updates available:\n\n", style="dim")
+
+        for pkg in packages[:15]:
+            name = pkg.get("name", "?")
+            current = pkg.get("current", "?")
+            latest = pkg.get("latest", "?")
+            content.append(f"  {name}\n", style="bold")
+            content.append(f"    {current}", style="yellow")
+            content.append(" -> ", style="dim")
+            content.append(f"{latest}\n", style="green")
+
+        if len(packages) > 15:
+            content.append(
+                f"\n  ... and {len(packages) - 15} more\n", style="dim italic"
+            )
+
+        self._content.update(content)
+        self._shown_welcome = True
+
+        if packages:
+            import time
+
+            self.mount(
+                Button(
+                    f"Upgrade All ({len(packages)})",
+                    id=f"npm-upgrade-all-{int(time.time() * 1000)}",
+                    variant="success",
+                )
+            )
+
     # Package display methods
     def show_pip_package(
         self, pkg: dict, env_type: str, env_path: str, is_system: bool
@@ -434,7 +485,11 @@ class DetailPanel(VerticalScroll):
         self._clear_buttons()
         name = pkg.get("name", "Unknown")
         version = pkg.get("version", "")
-        is_global = pkg_type == "global"
+        current = pkg.get("current", "")
+        latest = pkg.get("latest", "")
+        is_global = pkg_type in ("global", "outdated")  # outdated are global packages
+        is_outdated = bool(current and latest)
+
         self._current_npm_package = {
             "name": name,
             "is_global": is_global,
@@ -443,9 +498,16 @@ class DetailPanel(VerticalScroll):
 
         content = Text()
         content.append(f"{name}\n", style="bold green underline")
-        if version:
+
+        if is_outdated:
+            content.append("\nInstalled: ", style="bold")
+            content.append(f"{current}\n", style="yellow")
+            content.append("Available: ", style="bold")
+            content.append(f"{latest}\n", style="green")
+        elif version:
             content.append("\nVersion: ", style="bold")
             content.append(f"{version}\n", style="white")
+
         content.append("\nScope: ", style="bold")
         content.append(
             "Global\n" if is_global else "Local\n",
@@ -459,6 +521,15 @@ class DetailPanel(VerticalScroll):
         self._shown_welcome = True
 
         import time
+
+        if is_outdated and is_global:
+            self.mount(
+                Button(
+                    f"Upgrade {name}",
+                    id=f"npm-upgrade-{int(time.time() * 1000)}",
+                    variant="success",
+                )
+            )
 
         self.mount(
             Button(
@@ -839,7 +910,7 @@ class DetailPanel(VerticalScroll):
         latest = pkg.get("latest", "")
 
         is_outdated = bool(current and latest)
-        self._current_package = name if is_outdated else None
+        self._current_package = name
 
         content = Text()
         content.append(f"{name}\n", style="bold cyan underline")
@@ -874,9 +945,9 @@ class DetailPanel(VerticalScroll):
         self._content.update(content)
         self._shown_welcome = True
 
-        if is_outdated:
-            import time
+        import time
 
+        if is_outdated:
             self.mount(
                 Button(
                     f"Upgrade {name}",
@@ -884,6 +955,14 @@ class DetailPanel(VerticalScroll):
                     variant="success",
                 )
             )
+
+        self.mount(
+            Button(
+                f"Uninstall {name}",
+                id=f"brew-uninstall-{int(time.time() * 1000)}",
+                variant="error",
+            )
+        )
 
         if not cache.has(name):
             self.set_timer(0.05, lambda: self._load_brew_info(pkg))
@@ -1247,6 +1326,8 @@ class DetailPanel(VerticalScroll):
             self.post_message(self.BrewUpdate())
         elif btn_id.startswith("brew-upgrade-all"):
             self.post_message(self.BrewUpgradeAll())
+        elif btn_id.startswith("brew-uninstall") and self._current_package:
+            self.post_message(self.BrewUninstallPackage(self._current_package))
 
         # Symlink buttons
         elif btn_id.startswith("delete-symlink-btn") and self._current_symlink:
@@ -1273,6 +1354,10 @@ class DetailPanel(VerticalScroll):
                     pkg["name"], pkg["is_global"], pkg.get("project_path", "")
                 )
             )
+        elif btn_id.startswith("npm-upgrade-all"):
+            self.post_message(self.NpmUpgradeAll())
+        elif btn_id.startswith("npm-upgrade-") and self._current_npm_package:
+            self.post_message(self.NpmUpgradePackage(self._current_npm_package["name"]))
 
         # Shell editing buttons
         elif btn_id.startswith("edit-alias"):
