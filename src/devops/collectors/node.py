@@ -13,43 +13,44 @@ class NodeCollector(BaseCollector):
 
     @staticmethod
     def is_available() -> bool:
-        """Check if any Node.js version manager has actual installed versions."""
+        """Check if any Node.js version manager has actual installed versions.
+
+        Only uses fast filesystem checks - no subprocess calls.
+        """
         # Check for nvm with actual versions installed
         nvm_dir = os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))
         nvm_versions = Path(nvm_dir) / "versions" / "node"
-        if nvm_versions.exists() and any(nvm_versions.iterdir()):
-            return True
+        try:
+            if nvm_versions.exists() and any(nvm_versions.iterdir()):
+                return True
+        except (PermissionError, OSError):
+            pass
 
         # Check for fnm with actual versions installed
         fnm_versions = Path.home() / ".fnm" / "node-versions"
-        if fnm_versions.exists() and any(fnm_versions.iterdir()):
-            return True
+        try:
+            if fnm_versions.exists() and any(fnm_versions.iterdir()):
+                return True
+        except (PermissionError, OSError):
+            pass
 
         # Check for volta with actual versions installed
         volta_home = os.environ.get("VOLTA_HOME", str(Path.home() / ".volta"))
         volta_versions = Path(volta_home) / "tools" / "image" / "node"
-        if volta_versions.exists() and any(volta_versions.iterdir()):
+        try:
+            if volta_versions.exists() and any(volta_versions.iterdir()):
+                return True
+        except (PermissionError, OSError):
+            pass
+
+        # Check for homebrew node via filesystem (fast)
+        homebrew_node = Path("/opt/homebrew/bin/node")
+        if homebrew_node.exists():
             return True
-
-        # Check for homebrew node
-        try:
-            result = subprocess.run(
-                ["brew", "list", "node"], capture_output=True, timeout=5
-            )
-            if result.returncode == 0:
-                return True
-        except Exception:
-            pass
-
-        # Check for system node (only if it actually runs)
-        try:
-            result = subprocess.run(
-                ["node", "--version"], capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return True
-        except Exception:
-            pass
+        # Intel Mac path
+        homebrew_node_intel = Path("/usr/local/bin/node")
+        if homebrew_node_intel.exists():
+            return True
 
         return False
 

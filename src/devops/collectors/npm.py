@@ -21,6 +21,7 @@ class NpmCollector(BaseCollector):
             entries.append(
                 EnvEntry(
                     name="Global Packages",
+                    path="npm global",
                     status=Status.HEALTHY,
                     details={
                         "type": "global",
@@ -37,6 +38,7 @@ class NpmCollector(BaseCollector):
             entries.append(
                 EnvEntry(
                     name=f"Local: {Path(cwd).name}",
+                    path=cwd,
                     status=Status.HEALTHY,
                     details={
                         "type": "local",

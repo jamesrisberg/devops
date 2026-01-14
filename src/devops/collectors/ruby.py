@@ -12,30 +12,41 @@ class RubyCollector(BaseCollector):
 
     @staticmethod
     def is_available() -> bool:
-        """Check if any Ruby version manager has actual installed versions."""
+        """Check if any Ruby version manager has actual installed versions.
+
+        Only uses fast filesystem checks - no subprocess calls.
+        """
         # Check for rbenv with actual versions installed
         rbenv_root = os.environ.get("RBENV_ROOT", str(Path.home() / ".rbenv"))
         rbenv_versions = Path(rbenv_root) / "versions"
-        if rbenv_versions.exists() and any(rbenv_versions.iterdir()):
-            return True
+        try:
+            if rbenv_versions.exists() and any(rbenv_versions.iterdir()):
+                return True
+        except (PermissionError, OSError):
+            pass
 
         # Check for chruby with actual versions installed
         chruby_dir = Path("/opt/rubies")
-        if chruby_dir.exists() and any(chruby_dir.iterdir()):
-            return True
-        chruby_home = Path.home() / ".rubies"
-        if chruby_home.exists() and any(chruby_home.iterdir()):
-            return True
-
-        # Check for homebrew ruby (not system ruby)
         try:
-            result = subprocess.run(
-                ["brew", "list", "ruby"], capture_output=True, timeout=5
-            )
-            if result.returncode == 0:
+            if chruby_dir.exists() and any(chruby_dir.iterdir()):
                 return True
-        except Exception:
+        except (PermissionError, OSError):
             pass
+        chruby_home = Path.home() / ".rubies"
+        try:
+            if chruby_home.exists() and any(chruby_home.iterdir()):
+                return True
+        except (PermissionError, OSError):
+            pass
+
+        # Check for homebrew ruby via filesystem (fast)
+        homebrew_ruby = Path("/opt/homebrew/opt/ruby/bin/ruby")
+        if homebrew_ruby.exists():
+            return True
+        # Intel Mac path
+        homebrew_ruby_intel = Path("/usr/local/opt/ruby/bin/ruby")
+        if homebrew_ruby_intel.exists():
+            return True
 
         # Don't show tab for system ruby - it's not useful to display
         return False
