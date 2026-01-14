@@ -156,6 +156,9 @@ class MainScreen(Widget):
 
     def on_mount(self) -> None:
         self._load_fast_data()
+        # Start loading slower data in background
+        self.set_timer(0.1, self._load_brew_data)
+        self.set_timer(0.2, self._load_python_data)
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated

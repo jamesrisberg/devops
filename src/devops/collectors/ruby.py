@@ -12,21 +12,22 @@ class RubyCollector(BaseCollector):
 
     @staticmethod
     def is_available() -> bool:
-        """Check if any Ruby version manager or installation is available."""
-        # Check for rbenv
+        """Check if any Ruby version manager has actual installed versions."""
+        # Check for rbenv with actual versions installed
         rbenv_root = os.environ.get("RBENV_ROOT", str(Path.home() / ".rbenv"))
-        if Path(rbenv_root).exists():
+        rbenv_versions = Path(rbenv_root) / "versions"
+        if rbenv_versions.exists() and any(rbenv_versions.iterdir()):
             return True
 
-        # Check for chruby
+        # Check for chruby with actual versions installed
         chruby_dir = Path("/opt/rubies")
-        if chruby_dir.exists():
+        if chruby_dir.exists() and any(chruby_dir.iterdir()):
             return True
         chruby_home = Path.home() / ".rubies"
-        if chruby_home.exists():
+        if chruby_home.exists() and any(chruby_home.iterdir()):
             return True
 
-        # Check for homebrew ruby
+        # Check for homebrew ruby (not system ruby)
         try:
             result = subprocess.run(
                 ["brew", "list", "ruby"], capture_output=True, timeout=5
@@ -36,16 +37,7 @@ class RubyCollector(BaseCollector):
         except Exception:
             pass
 
-        # Check for system ruby
-        try:
-            result = subprocess.run(
-                ["which", "ruby"], capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return True
-        except Exception:
-            pass
-
+        # Don't show tab for system ruby - it's not useful to display
         return False
 
     def collect(self) -> list[EnvEntry]:

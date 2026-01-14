@@ -13,20 +13,22 @@ class NodeCollector(BaseCollector):
 
     @staticmethod
     def is_available() -> bool:
-        """Check if any Node.js version manager or installation is available."""
-        # Check for nvm
+        """Check if any Node.js version manager has actual installed versions."""
+        # Check for nvm with actual versions installed
         nvm_dir = os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))
-        if Path(nvm_dir).exists():
+        nvm_versions = Path(nvm_dir) / "versions" / "node"
+        if nvm_versions.exists() and any(nvm_versions.iterdir()):
             return True
 
-        # Check for fnm
-        fnm_dir = Path.home() / ".fnm"
-        if fnm_dir.exists():
+        # Check for fnm with actual versions installed
+        fnm_versions = Path.home() / ".fnm" / "node-versions"
+        if fnm_versions.exists() and any(fnm_versions.iterdir()):
             return True
 
-        # Check for volta
+        # Check for volta with actual versions installed
         volta_home = os.environ.get("VOLTA_HOME", str(Path.home() / ".volta"))
-        if Path(volta_home).exists():
+        volta_versions = Path(volta_home) / "tools" / "image" / "node"
+        if volta_versions.exists() and any(volta_versions.iterdir()):
             return True
 
         # Check for homebrew node
@@ -39,10 +41,10 @@ class NodeCollector(BaseCollector):
         except Exception:
             pass
 
-        # Check for system node
+        # Check for system node (only if it actually runs)
         try:
             result = subprocess.run(
-                ["which", "node"], capture_output=True, text=True, timeout=5
+                ["node", "--version"], capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0:
                 return True
