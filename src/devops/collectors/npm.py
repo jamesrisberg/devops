@@ -15,6 +15,22 @@ class NpmCollector(BaseCollector):
         """Collect all NPM packages."""
         entries = []
 
+        # Check for outdated global packages
+        outdated_pkgs = self._get_outdated_global()
+        if outdated_pkgs:
+            entries.append(
+                EnvEntry(
+                    name=f"Outdated ({len(outdated_pkgs)})",
+                    path="npm outdated",
+                    status=Status.WARNING,
+                    details={
+                        "type": "outdated",
+                        "packages": outdated_pkgs,
+                        "count": len(outdated_pkgs),
+                    },
+                )
+            )
+
         # Global packages
         global_pkgs = self._get_global_packages()
         if global_pkgs:
@@ -50,6 +66,32 @@ class NpmCollector(BaseCollector):
             )
 
         return entries
+
+    def _get_outdated_global(self) -> list[dict]:
+        """Get outdated global npm packages."""
+        try:
+            result = subprocess.run(
+                ["npm", "outdated", "-g", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            # npm outdated returns exit code 1 when there are outdated packages
+            if result.stdout:
+                data = json.loads(result.stdout)
+                return [
+                    {
+                        "name": name,
+                        "current": info.get("current", ""),
+                        "wanted": info.get("wanted", ""),
+                        "latest": info.get("latest", ""),
+                    }
+                    for name, info in data.items()
+                ]
+        except Exception:
+            pass
+
+        return []
 
     def _get_global_packages(self) -> list[dict]:
         """Get globally installed npm packages."""
