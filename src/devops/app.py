@@ -107,15 +107,9 @@ class DevopsApp(App):
         try:
             self.query_one("#loading-screen").styles.display = "none"
             self.query_one("#app-tabs").remove_class("hidden")
-            # Show welcome on the shell tab
-            main_screen = self.query_one(MainScreen)
-            try:
-                from devops.widgets.detail_panel import DetailPanel
-
-                panel = main_screen.query_one("#shell-detail", DetailPanel)
-                panel.show_shell_welcome()
-            except Exception:
-                pass
+            # The detail panel already initializes with the main welcome text,
+            # so we don't need to explicitly show any tab-specific welcome here.
+            # The user will see the main app welcome until they interact.
         except Exception:
             pass
 

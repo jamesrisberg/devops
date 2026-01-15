@@ -147,6 +147,11 @@ class DetailPanel(VerticalScroll):
     class GitRefresh(Message):
         pass
 
+    class GitRemoveScanDir(Message):
+        def __init__(self, path: str) -> None:
+            self.path = path
+            super().__init__()
+
     DEFAULT_CSS = """
     DetailPanel {
         height: 100%;
@@ -190,6 +195,7 @@ class DetailPanel(VerticalScroll):
         self._current_function_item = None
         # Git state
         self._current_git_repo = None
+        self._scan_dirs = []
 
     def compose(self):
         yield self._content
@@ -212,13 +218,17 @@ class DetailPanel(VerticalScroll):
         return text
 
     def _clear_buttons(self):
-        """Remove any existing buttons, inputs, and form labels."""
+        """Remove any existing buttons, inputs, form labels, and spacer statics."""
         for btn in list(self.query(Button)):
             btn.remove()
         for inp in list(self.query(Input)):
             inp.remove()
         for widget in list(self.query(".form-label")):
             widget.remove()
+        # Remove dynamically mounted Static widgets (spacers) but not _content
+        for widget in list(self.query(Static)):
+            if widget is not self._content:
+                widget.remove()
         self._awaiting_password = False
 
     # Welcome pages
@@ -1475,14 +1485,31 @@ class DetailPanel(VerticalScroll):
         )
         self._shown_welcome = True
 
-    def show_git_welcome(self, repo_count: int) -> None:
-        """Show Git welcome with refresh button."""
+    def show_git_welcome(
+        self, repo_count: int, scan_dirs: list = None, loading: bool = False
+    ) -> None:
+        """Show Git welcome with refresh button and scan directories."""
         self._clear_buttons()
+        self._scan_dirs = scan_dirs or []
+
         content = Text()
         content.append("Git Repositories\n\n", style="bold cyan underline")
-        content.append(f"Tracking {repo_count} repositories.\n\n", style="dim")
+
+        if loading:
+            content.append("Loading repository status...\n\n", style="dim italic")
+        else:
+            content.append(f"Tracking {repo_count} repositories.\n\n", style="dim")
+
         content.append("Select a repository to see its status,\n", style="italic")
         content.append("or use the buttons below to manage.\n\n", style="italic")
+
+        # Show saved scan directories
+        if self._scan_dirs:
+            content.append("Saved Scan Directories:\n", style="bold")
+            for i, scan_dir in enumerate(self._scan_dirs):
+                display_path = scan_dir.replace("/Users/jrisberg", "~")
+                content.append(f"  {display_path}\n", style="cyan")
+
         self._content.update(content)
 
         import time
@@ -1490,6 +1517,20 @@ class DetailPanel(VerticalScroll):
         ts = str(int(time.time() * 1000))
 
         self.mount(Button("Refresh Status", id=f"git-refresh-{ts}", variant="primary"))
+
+        # Show remove buttons for each scan directory
+        if self._scan_dirs:
+            self.mount(Static(""))
+            for i, scan_dir in enumerate(self._scan_dirs):
+                display_path = scan_dir.replace("/Users/jrisberg", "~")
+                self.mount(
+                    Button(
+                        f"Remove {display_path}",
+                        id=f"git-remove-scandir-{i}-{ts}",
+                        variant="warning",
+                    )
+                )
+
         self.mount(Static(""))
         self.mount(Static("Add more repositories:", classes="form-label"))
         self.mount(Input(placeholder="e.g., ~/dev", id=f"git-path-input-{ts}"))
@@ -1605,6 +1646,16 @@ class DetailPanel(VerticalScroll):
             return True
         elif btn_id.startswith("git-refresh"):
             self.post_message(self.GitRefresh())
+            return True
+        elif btn_id.startswith("git-remove-scandir-") and self._scan_dirs:
+            # Extract index from button id: git-remove-scandir-{index}-{timestamp}
+            import re
+
+            match = re.search(r"git-remove-scandir-(\d+)-", btn_id)
+            if match:
+                idx = int(match.group(1))
+                if 0 <= idx < len(self._scan_dirs):
+                    self.post_message(self.GitRemoveScanDir(self._scan_dirs[idx]))
             return True
         elif btn_id.startswith("git-remove") and self._current_git_repo:
             self.post_message(self.GitRemoveRepo(self._current_git_repo.path))

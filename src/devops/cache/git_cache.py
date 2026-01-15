@@ -13,27 +13,47 @@ def _ensure_cache_dir() -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_cached_repos() -> list[str]:
-    """Load cached repository paths."""
+def _load_cache_data() -> dict:
+    """Load raw cache data."""
     if not CACHE_FILE.exists():
-        return []
+        return {"repos": [], "scan_dirs": []}
 
     try:
         with open(CACHE_FILE) as f:
             data = json.load(f)
-            return data.get("repos", [])
+            # Ensure both keys exist
+            if "repos" not in data:
+                data["repos"] = []
+            if "scan_dirs" not in data:
+                data["scan_dirs"] = []
+            return data
     except (json.JSONDecodeError, IOError):
-        return []
+        return {"repos": [], "scan_dirs": []}
+
+
+def _save_cache_data(data: dict) -> None:
+    """Save raw cache data."""
+    _ensure_cache_dir()
+    data["last_updated"] = datetime.now().isoformat()
+    with open(CACHE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_cached_repos() -> list[str]:
+    """Load cached repository paths."""
+    return _load_cache_data().get("repos", [])
+
+
+def load_scan_dirs() -> list[str]:
+    """Load saved scan directories."""
+    return _load_cache_data().get("scan_dirs", [])
 
 
 def save_repos(repos: list[str]) -> None:
     """Save repository paths to cache."""
-    _ensure_cache_dir()
-
-    data = {"repos": repos, "last_updated": datetime.now().isoformat()}
-
-    with open(CACHE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    data = _load_cache_data()
+    data["repos"] = repos
+    _save_cache_data(data)
 
 
 def add_repo(path: str) -> list[str]:
@@ -82,3 +102,36 @@ def remove_repo(path: str) -> list[str]:
 def clear_cache() -> None:
     """Clear all cached repositories."""
     save_repos([])
+
+
+def add_scan_dir(path: str) -> list[str]:
+    """Add a scan directory. Returns updated list."""
+    data = _load_cache_data()
+    scan_dirs = data.get("scan_dirs", [])
+
+    # Normalize path
+    normalized = str(Path(path).expanduser().resolve())
+
+    if normalized not in scan_dirs:
+        scan_dirs.append(normalized)
+        scan_dirs.sort()
+        data["scan_dirs"] = scan_dirs
+        _save_cache_data(data)
+
+    return scan_dirs
+
+
+def remove_scan_dir(path: str) -> list[str]:
+    """Remove a scan directory. Returns updated list."""
+    data = _load_cache_data()
+    scan_dirs = data.get("scan_dirs", [])
+
+    # Normalize path
+    normalized = str(Path(path).expanduser().resolve())
+
+    if normalized in scan_dirs:
+        scan_dirs.remove(normalized)
+        data["scan_dirs"] = scan_dirs
+        _save_cache_data(data)
+
+    return scan_dirs

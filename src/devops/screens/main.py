@@ -14,7 +14,10 @@ from devops.cache.brew_cache import get_brew_cache
 from devops.cache.brew_list_cache import CacheKey, get_brew_list_cache
 from devops.cache.git_cache import (
     add_repos,
+    add_scan_dir,
     load_cached_repos,
+    load_scan_dirs,
+    remove_scan_dir,
 )
 from devops.cache.git_cache import (
     remove_repo as remove_git_repo,
@@ -104,6 +107,11 @@ class MainScreen(Widget):
         # Confirmation skip flag
         self._skip_confirmations = False
 
+        # Track if user has interacted yet (for initial welcome screen)
+        self._initial_load = True
+        # Track if initial data loading is in progress (suppress tree selection events)
+        self._loading_initial_data = True
+
     def compose(self) -> ComposeResult:
         with TabbedContent(id="main-tabs"):
             # Core tabs always present
@@ -173,6 +181,8 @@ class MainScreen(Widget):
     def on_mount(self) -> None:
         # Load shell config synchronously (it's fast)
         self._load_shell_data()
+        # Clear loading flag after shell data is loaded
+        self._loading_initial_data = False
         # Load everything else in background
         self.set_timer(0.05, self._load_path_data)
         self.set_timer(0.1, self._load_symlinks_data)
@@ -185,6 +195,12 @@ class MainScreen(Widget):
     ) -> None:
         """Lazy load data when tab is activated and show welcome."""
         pane_id = event.pane.id if event.pane else ""
+
+        # On initial load, keep the main welcome screen visible
+        # Don't show tab-specific welcome until user actually switches tabs
+        if self._initial_load:
+            self._initial_load = False
+            return
 
         if pane_id == "shell-tab":
             try:
@@ -283,16 +299,26 @@ class MainScreen(Widget):
                 pass
         elif pane_id == "git-tab":
             if not self._git_loaded:
+                # Show loading state immediately
+                try:
+                    panel = self.query_one("#git-detail", DetailPanel)
+                    repos = load_cached_repos()
+                    scan_dirs = load_scan_dirs()
+                    if repos:
+                        panel.show_git_welcome(len(repos), scan_dirs, loading=True)
+                except Exception:
+                    pass
                 self.set_timer(0.1, self._load_git_data)
             else:
                 # Check if we have repos - show setup or welcome
                 try:
                     panel = self.query_one("#git-detail", DetailPanel)
                     repos = load_cached_repos()
+                    scan_dirs = load_scan_dirs()
                     if not repos:
                         panel.show_git_setup()
                     else:
-                        panel.show_git_welcome(len(repos))
+                        panel.show_git_welcome(len(repos), scan_dirs)
                 except Exception:
                     pass
 
@@ -549,18 +575,26 @@ class MainScreen(Widget):
             return
         try:
             tree = self.query_one("#git-tree", EnvTree)
+            panel = self.query_one("#git-detail", DetailPanel)
+            repos = load_cached_repos()
+            scan_dirs = load_scan_dirs()
+
+            # Show loading state if we have repos
+            if repos:
+                panel.show_git_welcome(len(repos), scan_dirs, loading=True)
+                tree.root.label = "Git Repositories (loading...)"
+
+            # Collect repo status (this can be slow for many repos)
             entries = self._git_collector.collect()
             tree.set_entries(entries)
             tree.root.label = "Git Repositories (c=collapse)"
             self._git_loaded = True
 
             # Show appropriate panel
-            panel = self.query_one("#git-detail", DetailPanel)
-            repos = load_cached_repos()
             if not repos:
                 panel.show_git_setup()
             else:
-                panel.show_git_welcome(len(repos))
+                panel.show_git_welcome(len(repos), scan_dirs, loading=False)
         except Exception as e:
             self.app.notify(f"Git error: {e}", severity="error")
 
@@ -598,9 +632,15 @@ class MainScreen(Widget):
             self._load_npm_data()
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+        # Suppress selection events during initial data loading to preserve welcome screen
+        if self._loading_initial_data:
+            return
         self._handle_node_selection(event.node)
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        # Suppress selection events during initial data loading to preserve welcome screen
+        if self._loading_initial_data:
+            return
         self._handle_node_selection(event.node)
 
     def _handle_node_selection(self, node) -> None:
@@ -633,8 +673,44 @@ class MainScreen(Widget):
         node_data = node.data
 
         if node_data is None:
-            # Root node clicked - show welcome/setup for git
-            if tree_id == "git-tree":
+            # Root node or childless node clicked - show welcome for that tab
+            if tree_id == "shell-tree":
+                detail_panel.show_shell_welcome()
+            elif tree_id == "path-tree":
+                detail_panel.show_path_welcome()
+            elif tree_id == "symlinks-tree":
+                broken = self._get_broken_count()
+                detail_panel.show_symlinks_welcome(broken)
+            elif tree_id == "brew-tree":
+                outdated = self._get_outdated_count()
+                detail_panel.show_homebrew_welcome(
+                    outdated, loading=not self._brew_loaded, syncing=self._brew_syncing
+                )
+            elif tree_id == "python-tree":
+                detected = self._get_detected_python_sources()
+                detail_panel.show_python_welcome(detected)
+            elif tree_id == "node-tree":
+                manager = (
+                    self._node_collector._detect_manager()
+                    if self._node_collector
+                    else "unknown"
+                )
+                detail_panel.show_node_welcome(manager)
+            elif tree_id == "ruby-tree":
+                manager = (
+                    self._ruby_collector._detect_manager()
+                    if self._ruby_collector
+                    else "unknown"
+                )
+                detail_panel.show_ruby_welcome(manager)
+            elif tree_id == "rust-tree":
+                detail_panel.show_rust_welcome()
+            elif tree_id == "asdf-tree":
+                plugins = self._get_asdf_plugins()
+                detail_panel.show_asdf_welcome(plugins)
+            elif tree_id == "npm-tree":
+                detail_panel.show_npm_welcome()
+            elif tree_id == "git-tree":
                 repos = load_cached_repos()
                 if repos:
                     detail_panel.show_git_welcome(len(repos))
@@ -716,6 +792,11 @@ class MainScreen(Widget):
                     node_data.get("plugin", ""),
                     node_data.get("is_current", False),
                 )
+                return
+
+            # Git repo child nodes (branch, status, sync info)
+            if "git_repo" in node_data:
+                detail_panel.show_git_repo(node_data["git_repo"])
                 return
 
             item = node_data.get("item")
@@ -1402,6 +1483,8 @@ class MainScreen(Widget):
         repos = GitCollector.scan_directory(path)
         if repos:
             add_repos(repos)
+            # Save the scan directory for future reference
+            add_scan_dir(path)
             self.app.notify(f"Found {len(repos)} repositories", severity="information")
             self._git_loaded = False
             self._load_git_data()
@@ -1438,3 +1521,18 @@ class MainScreen(Widget):
         self._git_loaded = False
         self._load_git_data()
         self.app.notify("Refreshed", timeout=1)
+
+    def on_detail_panel_git_remove_scan_dir(
+        self, event: DetailPanel.GitRemoveScanDir
+    ) -> None:
+        """Handle removing a scan directory."""
+        remove_scan_dir(event.path)
+        # Refresh the panel to show updated scan dirs
+        try:
+            panel = self.query_one("#git-detail", DetailPanel)
+            repos = load_cached_repos()
+            scan_dirs = load_scan_dirs()
+            panel.show_git_welcome(len(repos), scan_dirs)
+        except Exception:
+            pass
+        self.app.notify(f"Removed scan directory", timeout=1)

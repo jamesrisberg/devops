@@ -418,12 +418,12 @@ class EnvTree(Tree):
         """Add Git repository status children."""
         details = entry.details
 
-        # Branch info
+        # Branch info - store reference to parent repo for detail display
         branch = details.get("branch", "?")
         branch_text = Text()
         branch_text.append(f"  branch: ", style="dim")
         branch_text.append(branch, style="bold magenta")
-        node.add_leaf(branch_text)
+        node.add_leaf(branch_text, data={"git_repo": entry, "child_type": "branch"})
 
         # Status counts
         modified = details.get("modified", 0)
@@ -439,7 +439,7 @@ class EnvTree(Tree):
                 status_text.append(f"~{modified} modified ", style="yellow")
             if untracked > 0:
                 status_text.append(f"?{untracked} untracked", style="red")
-            node.add_leaf(status_text)
+            node.add_leaf(status_text, data={"git_repo": entry, "child_type": "status"})
 
         # Ahead/behind
         ahead = details.get("ahead", 0)
@@ -451,7 +451,7 @@ class EnvTree(Tree):
                 sync_text.append(f"↑{ahead} ahead ", style="cyan")
             if behind > 0:
                 sync_text.append(f"↓{behind} behind", style="yellow")
-            node.add_leaf(sync_text)
+            node.add_leaf(sync_text, data={"git_repo": entry, "child_type": "sync"})
 
     def _create_label(self, entry: EnvEntry) -> Text:
         style_map = {
