@@ -1,12 +1,14 @@
 """Path input with autocomplete suggestions."""
+
 import os
 from pathlib import Path
+
 from textual.app import ComposeResult
-from textual.containers import Vertical
-from textual.widgets import Input, OptionList, Static
-from textual.widget import Widget
 from textual.binding import Binding
+from textual.containers import Vertical
 from textual.message import Message
+from textual.widget import Widget
+from textual.widgets import Input, OptionList, Static
 
 
 class PathInput(Widget):
@@ -47,6 +49,7 @@ class PathInput(Widget):
 
     class PathSelected(Message):
         """Emitted when a path is selected."""
+
         def __init__(self, path: str) -> None:
             self.path = path
             super().__init__()
@@ -80,7 +83,7 @@ class PathInput(Widget):
         """Update suggestions as user types."""
         if event.input.id != "path-field":
             return
-        
+
         path = event.value
         self._update_suggestions(path)
 
@@ -97,7 +100,7 @@ class PathInput(Widget):
         try:
             # Expand ~ to home directory
             expanded = os.path.expanduser(path)
-            
+
             # Determine directory and prefix
             if os.path.isdir(expanded):
                 base_dir = expanded
@@ -105,17 +108,17 @@ class PathInput(Widget):
             else:
                 base_dir = os.path.dirname(expanded) or "."
                 prefix = os.path.basename(expanded).lower()
-            
+
             if not os.path.isdir(base_dir):
                 suggestions.remove_class("visible")
                 return
-            
+
             # Get matching entries
             matches = []
             try:
                 for entry in os.scandir(base_dir):
                     name = entry.name
-                    if name.startswith('.') and not prefix.startswith('.'):
+                    if name.startswith(".") and not prefix.startswith("."):
                         continue  # Skip hidden unless explicitly typing .
                     if prefix == "" or name.lower().startswith(prefix):
                         if entry.is_dir():
@@ -124,11 +127,11 @@ class PathInput(Widget):
                             matches.append((name, False))
             except PermissionError:
                 pass
-            
+
             # Sort: directories first, then files
             matches.sort(key=lambda x: (not x[1], x[0].lower()))
             matches = matches[:10]  # Limit to 10
-            
+
             if matches:
                 for name, is_dir in matches:
                     full_path = os.path.join(base_dir, name)
@@ -139,7 +142,7 @@ class PathInput(Widget):
                         display = "📄 " + name
                     suggestions.add_option(display)
                     self._current_suggestions.append(full_path)
-                
+
                 suggestions.add_class("visible")
             else:
                 suggestions.remove_class("visible")
@@ -150,16 +153,23 @@ class PathInput(Widget):
         """Handle suggestion selection."""
         if event.option_list.id != "suggestions":
             return
-        
+
         idx = event.option_index
         if 0 <= idx < len(self._current_suggestions):
             selected_path = self._current_suggestions[idx]
+            # Debug: log if path has special chars
+            has_202f = "\u202f" in selected_path
             inp = self.query_one("#path-field", Input)
             inp.value = selected_path
-            
+            # Debug: check if value was preserved
+            if has_202f and "\u202f" not in inp.value:
+                self.log.warning(
+                    f"Unicode U+202F was lost! Before: {repr(selected_path)}, After: {repr(inp.value)}"
+                )
+
             suggestions = self.query_one("#suggestions", OptionList)
             suggestions.remove_class("visible")
-            
+
             # If directory, update suggestions
             if selected_path.endswith("/"):
                 self._update_suggestions(selected_path)

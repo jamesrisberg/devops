@@ -339,6 +339,7 @@ class ImageMagickScreen(Widget):
 
         try:
             inp = self.query_one("#input-file", PathInput).value.strip()
+            inp = os.path.expanduser(inp) if inp else ""
             if inp:
                 cmd.append(inp)
 
@@ -405,6 +406,7 @@ class ImageMagickScreen(Widget):
 
             # Output
             out = self.query_one("#output-file", PathInput).value.strip()
+            out = os.path.expanduser(out) if out else ""
             if not out and inp:
                 base, ext = os.path.splitext(inp)
                 if self.query_one("#toggle-convert", Checkbox).value:
@@ -447,8 +449,29 @@ class ImageMagickScreen(Widget):
 
     def _run_command(self) -> None:
         inp = self.query_one("#input-file", PathInput).value.strip()
+        inp = os.path.expanduser(inp) if inp else ""
         if not inp:
             self.app.notify("Please specify an input file", severity="warning")
+            return
+
+        # Check if input file exists
+        if not os.path.isfile(inp):
+            self.app.notify("Input file not found", severity="error")
+            output = self.query_one("#output-area", TextArea)
+            # Show diagnostic info about the path
+            special_chars = [
+                f"  pos {i}: U+{ord(c):04X}" for i, c in enumerate(inp) if ord(c) > 127
+            ]
+            special_info = "\n".join(special_chars) if special_chars else "  (none)"
+            output.load_text(
+                f"Error: File not found\n\n"
+                f"Path: {inp}\n"
+                f"Length: {len(inp)} chars\n\n"
+                f"Special characters:\n{special_info}\n\n"
+                f"This can happen if the filename contains special Unicode characters\n"
+                f"(like macOS screen recordings which use narrow no-break spaces U+202F).\n\n"
+                f"Try using the autocomplete to select the file."
+            )
             return
 
         output = self.query_one("#output-area", TextArea)
@@ -478,6 +501,7 @@ class ImageMagickScreen(Widget):
                 self._output_lines.append(line)
                 output = self.query_one("#output-area", TextArea)
                 output.load_text("".join(self._output_lines[-50:]))
+                output.scroll_end(animate=False)
         except (BlockingIOError, IOError):
             pass
 
@@ -489,6 +513,7 @@ class ImageMagickScreen(Widget):
             self._output_lines.append(status)
             output = self.query_one("#output-area", TextArea)
             output.load_text("".join(self._output_lines[-50:]))
+            output.scroll_end(animate=False)
             if ret == 0:
                 self.app.notify("ImageMagick completed!")
             self._process = None

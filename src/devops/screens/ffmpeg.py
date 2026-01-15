@@ -206,14 +206,14 @@ class FFmpegScreen(Widget):
                     yield Static("Resolution:")
                     yield Select(
                         [
-                            (("4K (3840p)", "3840:-1")),
-                            (("1080p", "1920:-1")),
-                            (("720p", "1280:-1")),
-                            (("480p", "854:-1")),
+                            (("4K (3840p)", "3840:-2")),
+                            (("1080p", "1920:-2")),
+                            (("720p", "1280:-2")),
+                            (("480p", "854:-2")),
                             (("Custom", "custom")),
                         ],
                         id="resolution",
-                        value="1920:-1",
+                        value="1920:-2",
                     )
                     yield Input(placeholder="Custom: width:height", id="custom-res")
 
@@ -324,6 +324,7 @@ class FFmpegScreen(Widget):
 
         try:
             inp = self.query_one("#input-file", PathInput).value.strip()
+            inp = os.path.expanduser(inp) if inp else ""
 
             # Trim - start time before input for fast seeking
             if self.query_one("#toggle-trim", Checkbox).value:
@@ -360,14 +361,14 @@ class FFmpegScreen(Widget):
 
                 # Output
                 out = self.query_one("#output-file", PathInput).value.strip()
+                out = os.path.expanduser(out) if out else ""
                 if not out and inp:
                     base = os.path.splitext(inp)[0]
                     out = f"{base}.{fmt}"
                 if out:
                     cmd.append(out)
             else:
-                # Video processing
-                out_fmt = "mp4"
+                # Video processing - preserve input format unless converting
                 if self.query_one("#toggle-convert", Checkbox).value:
                     out_fmt = self.query_one("#output-format", Select).value
                     if out_fmt == "mp4":
@@ -376,6 +377,13 @@ class FFmpegScreen(Widget):
                         cmd.extend(["-c:v", "libvpx-vp9", "-c:a", "libopus"])
                     elif out_fmt == "mov":
                         cmd.extend(["-c:v", "libx264", "-c:a", "aac"])
+                else:
+                    # Keep original format
+                    out_fmt = (
+                        os.path.splitext(inp)[1].lstrip(".").lower() if inp else "mp4"
+                    )
+                    if not out_fmt:
+                        out_fmt = "mp4"
 
                 # Compression
                 if self.query_one("#toggle-compress", Checkbox).value:
@@ -399,6 +407,7 @@ class FFmpegScreen(Widget):
 
                 # Output
                 out = self.query_one("#output-file", PathInput).value.strip()
+                out = os.path.expanduser(out) if out else ""
                 if not out and inp:
                     base = os.path.splitext(inp)[0]
                     suffix = "_output"
@@ -455,8 +464,29 @@ class FFmpegScreen(Widget):
 
     def _run_command(self) -> None:
         inp = self.query_one("#input-file", PathInput).value.strip()
+        inp = os.path.expanduser(inp) if inp else ""
         if not inp:
             self.app.notify("Please specify an input file", severity="warning")
+            return
+
+        # Check if input file exists
+        if not os.path.isfile(inp):
+            self.app.notify("Input file not found", severity="error")
+            output = self.query_one("#output-area", TextArea)
+            # Show diagnostic info about the path
+            special_chars = [
+                f"  pos {i}: U+{ord(c):04X}" for i, c in enumerate(inp) if ord(c) > 127
+            ]
+            special_info = "\n".join(special_chars) if special_chars else "  (none)"
+            output.load_text(
+                f"Error: File not found\n\n"
+                f"Path: {inp}\n"
+                f"Length: {len(inp)} chars\n\n"
+                f"Special characters:\n{special_info}\n\n"
+                f"This can happen if the filename contains special Unicode characters\n"
+                f"(like macOS screen recordings which use narrow no-break spaces U+202F).\n\n"
+                f"Try using the autocomplete to select the file."
+            )
             return
 
         output = self.query_one("#output-area", TextArea)
@@ -486,6 +516,7 @@ class FFmpegScreen(Widget):
                 self._output_lines.append(line)
                 output = self.query_one("#output-area", TextArea)
                 output.load_text("".join(self._output_lines[-50:]))
+                output.scroll_end(animate=False)
         except (BlockingIOError, IOError):
             pass
 
@@ -497,6 +528,7 @@ class FFmpegScreen(Widget):
             self._output_lines.append(status)
             output = self.query_one("#output-area", TextArea)
             output.load_text("".join(self._output_lines[-50:]))
+            output.scroll_end(animate=False)
             if ret == 0:
                 self.app.notify("FFmpeg completed!")
             self._process = None
