@@ -12,8 +12,16 @@ from textual.worker import Worker, get_current_worker
 from devops.actions import shell_edit
 from devops.cache.brew_cache import get_brew_cache
 from devops.cache.brew_list_cache import CacheKey, get_brew_list_cache
+from devops.cache.git_cache import (
+    add_repos,
+    load_cached_repos,
+)
+from devops.cache.git_cache import (
+    remove_repo as remove_git_repo,
+)
 from devops.collectors.asdf import AsdfCollector
 from devops.collectors.base import EnvEntry
+from devops.collectors.git import GitCollector
 from devops.collectors.homebrew import HomebrewCollector
 from devops.collectors.homebrew_async import (
     BrewCollectResult,
@@ -79,6 +87,7 @@ class MainScreen(Widget):
         self._ruby_collector = RubyCollector() if RubyCollector.is_available() else None
         self._rust_collector = RustCollector() if RustCollector.is_available() else None
         self._asdf_collector = AsdfCollector() if AsdfCollector.is_available() else None
+        self._git_collector = GitCollector() if GitCollector.is_available() else None
 
         self._brew_loaded = False
         self._python_loaded = False
@@ -87,6 +96,7 @@ class MainScreen(Widget):
         self._ruby_loaded = False
         self._rust_loaded = False
         self._asdf_loaded = False
+        self._git_loaded = False
 
         # Background sync state
         self._brew_syncing = False
@@ -148,6 +158,12 @@ class MainScreen(Widget):
                     with Horizontal(classes="split-view"):
                         yield EnvTree("asdf Plugins (loading...)", id="asdf-tree")
                         yield DetailPanel(id="asdf-detail")
+
+            if self._git_collector:
+                with TabPane("Git", id="git-tab"):
+                    with Horizontal(classes="split-view"):
+                        yield EnvTree("Git Repositories", id="git-tree")
+                        yield DetailPanel(id="git-detail")
 
             with TabPane("NPM", id="npm-tab"):
                 with Horizontal(classes="split-view"):
@@ -265,6 +281,20 @@ class MainScreen(Widget):
                 panel.show_npm_welcome()
             except Exception:
                 pass
+        elif pane_id == "git-tab":
+            if not self._git_loaded:
+                self.set_timer(0.1, self._load_git_data)
+            else:
+                # Check if we have repos - show setup or welcome
+                try:
+                    panel = self.query_one("#git-detail", DetailPanel)
+                    repos = load_cached_repos()
+                    if not repos:
+                        panel.show_git_setup()
+                    else:
+                        panel.show_git_welcome(len(repos))
+                except Exception:
+                    pass
 
     def _get_outdated_count(self) -> int:
         """Get count of outdated homebrew packages."""
@@ -394,6 +424,20 @@ class MainScreen(Widget):
             elif event.state.name == "ERROR":
                 self.app.notify("Failed to sync Homebrew data", severity="error")
             self._brew_syncing = False
+        elif event.worker.name == "git_scan_home":
+            if event.state.name == "SUCCESS" and event.worker.result:
+                repos = event.worker.result
+                if repos:
+                    add_repos(repos)
+                    self.app.notify(
+                        f"Found {len(repos)} repositories", severity="information"
+                    )
+                    self._git_loaded = False
+                    self._load_git_data()
+                else:
+                    self.app.notify("No git repositories found", severity="warning")
+            elif event.state.name == "ERROR":
+                self.app.notify("Failed to scan home directory", severity="error")
 
     def _update_brew_tree(self, entries: list, from_cache: bool) -> None:
         """Update the brew tree with entries."""
@@ -499,6 +543,27 @@ class MainScreen(Widget):
         except Exception as e:
             self.app.notify(f"NPM error: {e}", severity="error")
 
+    def _load_git_data(self) -> None:
+        """Load Git repository data."""
+        if not self._git_collector:
+            return
+        try:
+            tree = self.query_one("#git-tree", EnvTree)
+            entries = self._git_collector.collect()
+            tree.set_entries(entries)
+            tree.root.label = "Git Repositories (c=collapse)"
+            self._git_loaded = True
+
+            # Show appropriate panel
+            panel = self.query_one("#git-detail", DetailPanel)
+            repos = load_cached_repos()
+            if not repos:
+                panel.show_git_setup()
+            else:
+                panel.show_git_welcome(len(repos))
+        except Exception as e:
+            self.app.notify(f"Git error: {e}", severity="error")
+
     def refresh_data(self) -> None:
         """Refresh all data."""
         # Invalidate brew caches on manual refresh
@@ -553,6 +618,7 @@ class MainScreen(Widget):
             "rust-tree": "rust-detail",
             "asdf-tree": "asdf-detail",
             "npm-tree": "npm-detail",
+            "git-tree": "git-detail",
         }
 
         panel_id = panel_map.get(tree_id)
@@ -567,6 +633,13 @@ class MainScreen(Widget):
         node_data = node.data
 
         if node_data is None:
+            # Root node clicked - show welcome/setup for git
+            if tree_id == "git-tree":
+                repos = load_cached_repos()
+                if repos:
+                    detail_panel.show_git_welcome(len(repos))
+                else:
+                    detail_panel.show_git_setup()
             return
 
         if isinstance(node_data, dict):
@@ -697,6 +770,11 @@ class MainScreen(Widget):
             # Check for NPM group (global/local)
             if details.get("type") in ("global", "local"):
                 detail_panel.show_npm_welcome()
+                return
+
+            # Check for git repository
+            if "branch" in details:
+                detail_panel.show_git_repo(node_data)
                 return
 
             detail_panel.show_entry(node_data)
@@ -1309,3 +1387,54 @@ class MainScreen(Widget):
                 failed += 1
         self.app.notify(f"Deleted {deleted}, failed {failed}", severity="information")
         self._refresh_symlinks()
+
+    # Git handlers
+    def on_detail_panel_git_add_path(self, event: DetailPanel.GitAddPath) -> None:
+        """Handle adding a git path."""
+        path = event.path
+        self.app.notify(f"Scanning {path}...", timeout=2)
+        self.set_timer(0.1, lambda: self._scan_git_path(path))
+
+    def _scan_git_path(self, path: str) -> None:
+        """Scan a path for git repositories."""
+        from devops.collectors.git import GitCollector
+
+        repos = GitCollector.scan_directory(path)
+        if repos:
+            add_repos(repos)
+            self.app.notify(f"Found {len(repos)} repositories", severity="information")
+            self._git_loaded = False
+            self._load_git_data()
+        else:
+            self.app.notify("No git repositories found", severity="warning")
+
+    def on_detail_panel_git_scan_home(self, event: DetailPanel.GitScanHome) -> None:
+        """Handle scanning home directory for git repos."""
+        self.app.notify("Scanning home directory (this may take a while)...", timeout=5)
+        self.run_worker(
+            self._scan_home_worker,
+            name="git_scan_home",
+            thread=True,
+            exclusive=True,
+        )
+
+    def _scan_home_worker(self) -> list[str]:
+        """Worker thread: Scan home directory for repos."""
+        from pathlib import Path
+
+        from devops.collectors.git import GitCollector
+
+        return GitCollector.scan_directory(str(Path.home()), max_depth=6)
+
+    def on_detail_panel_git_remove_repo(self, event: DetailPanel.GitRemoveRepo) -> None:
+        """Handle removing a repo from the list."""
+        remove_git_repo(event.path)
+        self.app.notify(f"Removed {event.path}", severity="information")
+        self._git_loaded = False
+        self._load_git_data()
+
+    def on_detail_panel_git_refresh(self, event: DetailPanel.GitRefresh) -> None:
+        """Handle git refresh request."""
+        self._git_loaded = False
+        self._load_git_data()
+        self.app.notify("Refreshed", timeout=1)

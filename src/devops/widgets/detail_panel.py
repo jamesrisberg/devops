@@ -130,6 +130,23 @@ class DetailPanel(VerticalScroll):
             self.end_line = end_line
             super().__init__()
 
+    # Git messages
+    class GitAddPath(Message):
+        def __init__(self, path: str) -> None:
+            self.path = path
+            super().__init__()
+
+    class GitScanHome(Message):
+        pass
+
+    class GitRemoveRepo(Message):
+        def __init__(self, path: str) -> None:
+            self.path = path
+            super().__init__()
+
+    class GitRefresh(Message):
+        pass
+
     DEFAULT_CSS = """
     DetailPanel {
         height: 100%;
@@ -171,6 +188,8 @@ class DetailPanel(VerticalScroll):
         self._current_shell_file = None
         self._current_alias_item = None
         self._current_function_item = None
+        # Git state
+        self._current_git_repo = None
 
     def compose(self):
         yield self._content
@@ -1319,6 +1338,10 @@ class DetailPanel(VerticalScroll):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id or ""
 
+        # Git buttons (check first)
+        if self._handle_git_button(btn_id):
+            return
+
         # Homebrew buttons
         if btn_id.startswith("upgrade-btn") and self._current_package:
             self.post_message(self.UpgradePackage(self._current_package))
@@ -1419,3 +1442,191 @@ class DetailPanel(VerticalScroll):
         self._clear_buttons()
         self._content.update(self._get_welcome_text())
         self._shown_welcome = False
+
+    # Git methods
+    def show_git_setup(self) -> None:
+        """Show Git setup UI for first-time configuration."""
+        self._clear_buttons()
+        content = Text()
+        content.append("Git Repositories\n\n", style="bold cyan underline")
+        content.append("No repositories configured yet.\n\n", style="dim")
+        content.append(
+            "Add a path to scan for repositories, or scan your\n"
+            "home directory to find all git repos.\n\n",
+            style="italic",
+        )
+        content.append("Path to scan:\n", style="bold")
+        self._content.update(content)
+
+        import time
+
+        ts = str(int(time.time() * 1000))
+
+        self.mount(
+            Input(
+                placeholder="e.g., ~/dev or ~/projects/my-repo",
+                id=f"git-path-input-{ts}",
+            )
+        )
+        self.mount(Button("Add Path", id=f"git-add-path-{ts}", variant="primary"))
+        self.mount(Static(""))
+        self.mount(
+            Button("Scan Home Directory", id=f"git-scan-home-{ts}", variant="warning")
+        )
+        self._shown_welcome = True
+
+    def show_git_welcome(self, repo_count: int) -> None:
+        """Show Git welcome with refresh button."""
+        self._clear_buttons()
+        content = Text()
+        content.append("Git Repositories\n\n", style="bold cyan underline")
+        content.append(f"Tracking {repo_count} repositories.\n\n", style="dim")
+        content.append("Select a repository to see its status,\n", style="italic")
+        content.append("or use the buttons below to manage.\n\n", style="italic")
+        self._content.update(content)
+
+        import time
+
+        ts = str(int(time.time() * 1000))
+
+        self.mount(Button("Refresh Status", id=f"git-refresh-{ts}", variant="primary"))
+        self.mount(Static(""))
+        self.mount(Static("Add more repositories:", classes="form-label"))
+        self.mount(Input(placeholder="e.g., ~/dev", id=f"git-path-input-{ts}"))
+        self.mount(Button("Add Path", id=f"git-add-path-{ts}", variant="default"))
+        self.mount(Static(""))
+        self.mount(
+            Button("Scan Home Directory", id=f"git-scan-home-{ts}", variant="warning")
+        )
+        self._shown_welcome = True
+
+    def show_git_repo(self, entry: EnvEntry) -> None:
+        """Show details for a git repository."""
+        self._clear_buttons()
+        self._current_git_repo = entry
+        details = entry.details
+
+        content = Text()
+        content.append(f"{entry.name}\n\n", style="bold cyan underline")
+
+        # Path
+        content.append("Path: ", style="bold")
+        content.append(f"{entry.path}\n\n", style="dim")
+
+        # Branch
+        branch = details.get("branch", "?")
+        content.append("Branch: ", style="bold")
+        content.append(f"{branch}\n", style="magenta")
+
+        # Remote
+        remote_url = details.get("remote_url", "")
+        if remote_url:
+            content.append("Remote: ", style="bold")
+            content.append(f"{remote_url}\n", style="dim")
+
+        content.append("\n")
+
+        # Status
+        is_clean = details.get("clean", False)
+        if is_clean:
+            content.append("Status: ", style="bold")
+            content.append("Clean\n", style="green")
+        else:
+            content.append("Status:\n", style="bold")
+            staged = details.get("staged", 0)
+            modified = details.get("modified", 0)
+            untracked = details.get("untracked", 0)
+
+            if staged > 0:
+                content.append(f"  +{staged} staged\n", style="green")
+            if modified > 0:
+                content.append(f"  ~{modified} modified\n", style="yellow")
+            if untracked > 0:
+                content.append(f"  ?{untracked} untracked\n", style="red")
+
+        # Ahead/behind
+        ahead = details.get("ahead", 0)
+        behind = details.get("behind", 0)
+        if ahead > 0 or behind > 0:
+            content.append("\nSync: ", style="bold")
+            if ahead > 0:
+                content.append(f"↑{ahead} ahead ", style="cyan")
+            if behind > 0:
+                content.append(f"↓{behind} behind", style="yellow")
+            content.append("\n")
+
+        # Last commit
+        last_commit = details.get("last_commit", "")
+        last_commit_msg = details.get("last_commit_msg", "")
+        last_commit_date = details.get("last_commit_date", "")
+        if last_commit:
+            content.append("\nLast commit: ", style="bold")
+            content.append(f"{last_commit}", style="cyan")
+            if last_commit_msg:
+                content.append(f" - {last_commit_msg}", style="dim")
+            if last_commit_date:
+                content.append(f"\n  {last_commit_date}", style="dim italic")
+            content.append("\n")
+
+        # Error if any
+        if details.get("error"):
+            content.append(f"\nError: {details['error']}\n", style="red")
+
+        self._content.update(content)
+
+        import time
+
+        ts = str(int(time.time() * 1000))
+
+        self.mount(
+            Button("Open in Terminal", id=f"git-open-terminal-{ts}", variant="primary")
+        )
+        self.mount(
+            Button("Open in Finder", id=f"git-open-finder-{ts}", variant="default")
+        )
+        self.mount(Button("Remove from List", id=f"git-remove-{ts}", variant="warning"))
+
+    def _handle_git_button(self, btn_id: str) -> bool:
+        """Handle git-related button presses. Returns True if handled."""
+        if btn_id.startswith("git-add-path"):
+            # Find the input field
+            for widget in self.query(Input):
+                if "git-path-input" in widget.id:
+                    path = widget.value.strip()
+                    if path:
+                        import os
+
+                        path = os.path.expanduser(path)
+                        self.post_message(self.GitAddPath(path))
+                    break
+            return True
+        elif btn_id.startswith("git-scan-home"):
+            self.post_message(self.GitScanHome())
+            return True
+        elif btn_id.startswith("git-refresh"):
+            self.post_message(self.GitRefresh())
+            return True
+        elif btn_id.startswith("git-remove") and self._current_git_repo:
+            self.post_message(self.GitRemoveRepo(self._current_git_repo.path))
+            return True
+        elif btn_id.startswith("git-open-terminal") and self._current_git_repo:
+            import subprocess
+
+            subprocess.Popen(
+                ["open", "-a", "Terminal", self._current_git_repo.path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.app.notify("Opened in Terminal")
+            return True
+        elif btn_id.startswith("git-open-finder") and self._current_git_repo:
+            import subprocess
+
+            subprocess.Popen(
+                ["open", self._current_git_repo.path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.app.notify("Opened in Finder")
+            return True
+        return False

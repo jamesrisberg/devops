@@ -106,6 +106,9 @@ class EnvTree(Tree):
             # asdf plugins with versions
             elif "plugin" in details and "versions" in details:
                 self._add_asdf_children(node, entry)
+            # Git repositories
+            elif "branch" in details:
+                self._add_git_children(node, entry)
 
         self.root.expand()
         self.root.allow_expand = False
@@ -411,6 +414,45 @@ class EnvTree(Tree):
                 },
             )
 
+    def _add_git_children(self, node, entry: EnvEntry) -> None:
+        """Add Git repository status children."""
+        details = entry.details
+
+        # Branch info
+        branch = details.get("branch", "?")
+        branch_text = Text()
+        branch_text.append(f"  branch: ", style="dim")
+        branch_text.append(branch, style="bold magenta")
+        node.add_leaf(branch_text)
+
+        # Status counts
+        modified = details.get("modified", 0)
+        staged = details.get("staged", 0)
+        untracked = details.get("untracked", 0)
+
+        if modified > 0 or staged > 0 or untracked > 0:
+            status_text = Text()
+            status_text.append("  ", style="dim")
+            if staged > 0:
+                status_text.append(f"+{staged} staged ", style="green")
+            if modified > 0:
+                status_text.append(f"~{modified} modified ", style="yellow")
+            if untracked > 0:
+                status_text.append(f"?{untracked} untracked", style="red")
+            node.add_leaf(status_text)
+
+        # Ahead/behind
+        ahead = details.get("ahead", 0)
+        behind = details.get("behind", 0)
+        if ahead > 0 or behind > 0:
+            sync_text = Text()
+            sync_text.append("  ", style="dim")
+            if ahead > 0:
+                sync_text.append(f"↑{ahead} ahead ", style="cyan")
+            if behind > 0:
+                sync_text.append(f"↓{behind} behind", style="yellow")
+            node.add_leaf(sync_text)
+
     def _create_label(self, entry: EnvEntry) -> Text:
         style_map = {
             Status.HEALTHY: "green",
@@ -510,6 +552,23 @@ class EnvTree(Tree):
             text.append(entry.name)
             if details.get("package_count", 0) > 0:
                 text.append(f" ({details['package_count']})", style="dim")
+        # Git repositories
+        elif "branch" in details:
+            text.append(entry.name)
+            branch = details.get("branch", "?")
+            text.append(f" [{branch}]", style="magenta")
+            if details.get("clean"):
+                text.append(" clean", style="dim green")
+            else:
+                counts = []
+                if details.get("staged", 0) > 0:
+                    counts.append(f"+{details['staged']}")
+                if details.get("modified", 0) > 0:
+                    counts.append(f"~{details['modified']}")
+                if details.get("untracked", 0) > 0:
+                    counts.append(f"?{details['untracked']}")
+                if counts:
+                    text.append(f" {' '.join(counts)}", style="yellow")
         else:
             text.append(entry.name)
 
