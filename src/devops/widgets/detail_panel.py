@@ -9,6 +9,7 @@ from textual.widgets import Button, Input, Static
 
 from devops.cache.brew_cache import get_brew_cache
 from devops.collectors.base import EnvEntry, Status
+from devops.widgets.loading_animation import BRANCH_FRAMES, LoadingAnimation
 
 
 class DetailPanel(VerticalScroll):
@@ -218,12 +219,16 @@ class DetailPanel(VerticalScroll):
         return text
 
     def _clear_buttons(self):
-        """Remove any existing buttons, inputs, form labels, and spacer statics."""
+        """Remove any existing buttons, inputs, form labels, spacer statics, and animations."""
         for btn in list(self.query(Button)):
             btn.remove()
         for inp in list(self.query(Input)):
             inp.remove()
         for widget in list(self.query(".form-label")):
+            widget.remove()
+        # Remove loading animations
+        for widget in list(self.query(LoadingAnimation)):
+            widget.stop()
             widget.remove()
         # Remove dynamically mounted Static widgets (spacers) but not _content
         for widget in list(self.query(Static)):
@@ -1496,7 +1501,19 @@ class DetailPanel(VerticalScroll):
         content.append("Git Repositories\n\n", style="bold cyan underline")
 
         if loading:
-            content.append("Loading repository status...\n\n", style="dim italic")
+            content.append(f"Scanning {repo_count} repositories...\n", style="dim")
+            self._content.update(content)
+            # Mount animated loading indicator
+            self.mount(
+                LoadingAnimation(
+                    frames=BRANCH_FRAMES,
+                    message=f"Fetching status for {repo_count} repos...",
+                    style="green",
+                    interval=0.2,
+                )
+            )
+            self._shown_welcome = True
+            return
         else:
             content.append(f"Tracking {repo_count} repositories.\n\n", style="dim")
 

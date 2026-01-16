@@ -25,6 +25,7 @@ from devops.cache.git_cache import (
 from devops.collectors.asdf import AsdfCollector
 from devops.collectors.base import EnvEntry
 from devops.collectors.git import GitCollector
+from devops.collectors.git_async import GitCollectResult, collect_git_sync
 from devops.collectors.homebrew import HomebrewCollector
 from devops.collectors.homebrew_async import (
     BrewCollectResult,
@@ -78,19 +79,25 @@ class MainScreen(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._path_collector = PathCollector()
-        self._shell_collector = ShellConfigCollector()
-        self._homebrew_collector = HomebrewCollector()
-        self._python_collector = PythonEnvCollector()
-        self._symlink_collector = SymlinkCollector()
-        self._npm_collector = NpmCollector()
+        # Collectors initialized lazily in on_mount to avoid blocking app startup
+        self._path_collector = None
+        self._shell_collector = None
+        self._homebrew_collector = None
+        self._python_collector = None
+        self._symlink_collector = None
+        self._npm_collector = None
+        self._node_collector = None
+        self._ruby_collector = None
+        self._rust_collector = None
+        self._asdf_collector = None
+        self._git_collector = None
 
-        # Conditional collectors - only create if available
-        self._node_collector = NodeCollector() if NodeCollector.is_available() else None
-        self._ruby_collector = RubyCollector() if RubyCollector.is_available() else None
-        self._rust_collector = RustCollector() if RustCollector.is_available() else None
-        self._asdf_collector = AsdfCollector() if AsdfCollector.is_available() else None
-        self._git_collector = GitCollector() if GitCollector.is_available() else None
+        # Track which optional tabs are available (fast filesystem checks only)
+        self._has_node = NodeCollector.is_available()
+        self._has_ruby = RubyCollector.is_available()
+        self._has_rust = RustCollector.is_available()
+        self._has_asdf = AsdfCollector.is_available()
+        self._has_git = GitCollector.is_available()
 
         self._brew_loaded = False
         self._python_loaded = False
@@ -143,31 +150,31 @@ class MainScreen(Widget):
                     yield DetailPanel(id="python-detail")
 
             # Conditional language tabs
-            if self._node_collector:
+            if self._has_node:
                 with TabPane("Node", id="node-tab"):
                     with Horizontal(classes="split-view"):
                         yield EnvTree("Node.js Versions (loading...)", id="node-tree")
                         yield DetailPanel(id="node-detail")
 
-            if self._ruby_collector:
+            if self._has_ruby:
                 with TabPane("Ruby", id="ruby-tab"):
                     with Horizontal(classes="split-view"):
                         yield EnvTree("Ruby Versions (loading...)", id="ruby-tree")
                         yield DetailPanel(id="ruby-detail")
 
-            if self._rust_collector:
+            if self._has_rust:
                 with TabPane("Rust", id="rust-tab"):
                     with Horizontal(classes="split-view"):
                         yield EnvTree("Rust Toolchains (loading...)", id="rust-tree")
                         yield DetailPanel(id="rust-detail")
 
-            if self._asdf_collector:
+            if self._has_asdf:
                 with TabPane("asdf", id="asdf-tab"):
                     with Horizontal(classes="split-view"):
                         yield EnvTree("asdf Plugins (loading...)", id="asdf-tree")
                         yield DetailPanel(id="asdf-detail")
 
-            if self._git_collector:
+            if self._has_git:
                 with TabPane("Git", id="git-tab"):
                     with Horizontal(classes="split-view"):
                         yield EnvTree("Git Repositories", id="git-tree")
@@ -179,6 +186,12 @@ class MainScreen(Widget):
                     yield DetailPanel(id="npm-detail")
 
     def on_mount(self) -> None:
+        # Defer ALL initialization to let the loading animation run smoothly
+        self.set_timer(0.01, self._deferred_init)
+
+    def _deferred_init(self) -> None:
+        """Initialize collectors and load data. Deferred from on_mount for smooth animation."""
+        self._init_collectors()
         # Load shell config synchronously (it's fast)
         self._load_shell_data()
         # Clear loading flag after shell data is loaded
@@ -189,6 +202,27 @@ class MainScreen(Widget):
         self.set_timer(0.15, self._load_brew_data)
         self.set_timer(0.2, self._load_python_data)
         self.set_timer(0.25, self._load_npm_data)
+
+    def _init_collectors(self) -> None:
+        """Initialize collectors. Called from on_mount to avoid blocking app startup."""
+        self._path_collector = PathCollector()
+        self._shell_collector = ShellConfigCollector()
+        self._homebrew_collector = HomebrewCollector()
+        self._python_collector = PythonEnvCollector()
+        self._symlink_collector = SymlinkCollector()
+        self._npm_collector = NpmCollector()
+
+        # Conditional collectors
+        if self._has_node:
+            self._node_collector = NodeCollector()
+        if self._has_ruby:
+            self._ruby_collector = RubyCollector()
+        if self._has_rust:
+            self._rust_collector = RustCollector()
+        if self._has_asdf:
+            self._asdf_collector = AsdfCollector()
+        if self._has_git:
+            self._git_collector = GitCollector()
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
@@ -450,6 +484,12 @@ class MainScreen(Widget):
             elif event.state.name == "ERROR":
                 self.app.notify("Failed to sync Homebrew data", severity="error")
             self._brew_syncing = False
+        elif event.worker.name == "git_collect":
+            if event.state.name == "SUCCESS" and event.worker.result:
+                self._update_git_tree(event.worker.result)
+            elif event.state.name == "ERROR":
+                self.app.notify("Failed to load Git data", severity="error")
+                self._git_loaded = True  # Mark as loaded to prevent retry loops
         elif event.worker.name == "git_scan_home":
             if event.state.name == "SUCCESS" and event.worker.result:
                 repos = event.worker.result
@@ -570,7 +610,7 @@ class MainScreen(Widget):
             self.app.notify(f"NPM error: {e}", severity="error")
 
     def _load_git_data(self) -> None:
-        """Load Git repository data."""
+        """Load Git repository data using background worker."""
         if not self._git_collector:
             return
         try:
@@ -584,17 +624,38 @@ class MainScreen(Widget):
                 panel.show_git_welcome(len(repos), scan_dirs, loading=True)
                 tree.root.label = "Git Repositories (loading...)"
 
-            # Collect repo status (this can be slow for many repos)
-            entries = self._git_collector.collect()
-            tree.set_entries(entries)
+            # Show setup if no repos configured
+            if not repos:
+                panel.show_git_setup()
+                self._git_loaded = True
+                return
+
+            # Start background worker to collect repo status
+            self.run_worker(
+                self._collect_git_data_worker,
+                name="git_collect",
+                thread=True,
+                exclusive=True,
+            )
+        except Exception as e:
+            self.app.notify(f"Git error: {e}", severity="error")
+
+    def _collect_git_data_worker(self) -> GitCollectResult:
+        """Worker thread: Collect git repository data."""
+        return collect_git_sync()
+
+    def _update_git_tree(self, result: GitCollectResult) -> None:
+        """Update the git tree with collected data."""
+        try:
+            tree = self.query_one("#git-tree", EnvTree)
+            panel = self.query_one("#git-detail", DetailPanel)
+            scan_dirs = load_scan_dirs()
+
+            tree.set_entries(result.entries)
             tree.root.label = "Git Repositories (c=collapse)"
             self._git_loaded = True
 
-            # Show appropriate panel
-            if not repos:
-                panel.show_git_setup()
-            else:
-                panel.show_git_welcome(len(repos), scan_dirs, loading=False)
+            panel.show_git_welcome(result.repo_count, scan_dirs, loading=False)
         except Exception as e:
             self.app.notify(f"Git error: {e}", severity="error")
 
