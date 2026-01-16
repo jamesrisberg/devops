@@ -4,8 +4,14 @@ Development Environment Topology Visualizer - A TUI tool to visualize, analyze, 
 
 ## Installation
 
+Local:
 ```bash
 pip install -e .
+```
+
+Homebrew:
+```bash
+brew install jamesrisberg/devops/devops
 ```
 
 ## Usage
@@ -20,4 +26,6 @@ devops
 - View shell config files  
 - Detect issues (duplicates, broken symlinks, conflicts)
 - Clean up with confirmation
+- View, update and uninstall packages from homebrew, npm, and other major package managers
+- Build and run commplex ffmpeg and imagemagick commands from simple forms
 
