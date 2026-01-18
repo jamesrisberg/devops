@@ -27,5 +27,5 @@ devops
 - Detect issues (duplicates, broken symlinks, conflicts)
 - Clean up with confirmation
 - View, update and uninstall packages from homebrew, npm, and other major package managers
-- Build and run commplex ffmpeg and imagemagick commands from simple forms
+- Build and run complex ffmpeg and imagemagick commands from simple forms
 
